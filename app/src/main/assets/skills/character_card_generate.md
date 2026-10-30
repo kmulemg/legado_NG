@@ -3,7 +3,7 @@ id: character_card_generate
 name: 角色卡生成
 description: 基于指定书籍和章节范围采样阅读原文，生成主要角色的待审核角色卡。
 scope: AGENT
-version: 23
+version: 24
 suggestions: 给当前书生成角色卡|从上次继续扫描角色卡|指定章节范围生成角色卡
 mcp_capabilities: bookshelf.query|bookshelf.read_content|bookshelf.search_content|bookshelf.cache_status|bookshelf.manage_characters|ai.memory
 conversation_group: 书籍相关
@@ -106,6 +106,7 @@ hook.core.memory_flush: {"watch_tools":["bookshelf_text_window_get","bookshelf_c
 - `bookshelf_text_search`：在已缓存或本地正文中定位角色名和别名，返回命中章节清单；用它决定读哪几章，不要整本通读。
 - `bookshelf_cache_status_get`：读取章节缓存状态和字数/缓存信息。
 - `bookshelf_text_window_get` 或 `bookshelf_chapter_content_get`：读取章节正文。
+- `agent_memory_status_get`：读取记忆系统开关；每次进入 preview 先调用一次，决定是否使用记忆流程。
 - `agent_memory_search`：按当前书、`domain=character_card` 和具体 `memory_type` 读取扫描、候选、预览与应用状态。
 - `agent_memory_upsert` / `agent_memory_batch_upsert`：保存本次变化项；消费正文或角色卡写入结果时必须传入对应的 `source_receipt_ids`。它们不会创建或更新作品角色卡。
 
@@ -119,6 +120,19 @@ preview 阶段禁止调用这些写工具：
 如果某个工具名虽然是 `get`，但说明里包含“创建”或“写入”，不要在 `preview` 阶段调用。
 
 AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 Skill 的扫描工作状态；不得借记忆工具改写书籍、角色卡、缓存或其它业务数据。
+
+### 记忆关闭时的降级流程
+
+进入 preview 后先调用 `agent_memory_status_get`：
+
+- 如果返回 `enabled=true`：按本文的记忆流程执行。
+- 如果 `enabled=false`，或当前会话没有 `ai.memory` 能力：
+  - 不要调用任何 `agent_memory_*` 工具，包括 `agent_memory_search`、`agent_memory_upsert`、`agent_memory_batch_upsert`。
+  - 不要依赖 manifest/preview 记忆，也不要在结果里声称“已保存记忆”。
+  - 在聊天中维护本轮状态：请求范围、扫描强度、已读章节/窗口、候选观察。
+  - 仍然严格执行“预览表格 → 用户明确确认 → 写入”的门禁；预览表格是唯一状态来源。
+  - 开始时明确告知用户：“角色卡记忆已关闭，本次可以正常生成，但不支持中断续扫或重启恢复；需要恢复能力请先在 AI 设置中开启记忆。”
+  - 用户要求“从上次继续”但没有记忆时，说明无法恢复，让用户重新选择范围。
 
 ### 预览与应用之间的硬门禁
 
@@ -140,11 +154,12 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 
 进入 `apply` 阶段后，才允许调用：
 
+- `agent_memory_status_get`：只读检查记忆开关，决定是否使用记忆流程。
 - `bookshelf_character_profile_get`：只读获取角色档案；不要传 `create`，也不要期待它创建数据。
 - `bookshelf_character_upsert`：写入用户确认后的角色卡。
 - `bookshelf_character_set_enabled`：只在用户明确要求启用或禁用已有角色卡时使用。
 - `bookshelf_character_delete`：只在用户明确要求删除已有角色卡时使用。
-- `agent_memory_search/batch_upsert`：读取已确认预览，并在整批业务写入完成后一次性记录各角色的成功/失败状态。
+- `agent_memory_search/batch_upsert`（仅记忆启用时）：读取已确认预览，并在整批业务写入完成后一次性记录各角色的成功/失败状态。
 
 `apply` 阶段也要先说明将应用哪些角色；如果用户的确认消息没有指向上一轮表格，先反问确认，不要猜。
 
@@ -162,17 +177,23 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 
 ### apply 后的显式状态提交
 
-收到应用确认后，先用 `agent_memory_search(scope_type=book, scope_key=work_key, domain=character_card, memory_type=preview)` 读取最新预览；只有状态为 `ready/revised` 且内容与用户最后确认的可见表格一致时才写入。若预览不存在、已变化或已应用，先向用户说明，不凭聊天残片猜测。
+收到应用确认后：
+
+- 如果记忆启用：先用 `agent_memory_search(scope_type=book, scope_key=work_key, domain=character_card, memory_type=preview)` 读取最新预览；只有状态为 `ready/revised/partial` 且内容与用户最后确认的可见表格一致时才写入。若预览不存在、已变化或已是 `confirmed`，先向用户说明，不凭聊天残片猜测。
+- 如果记忆关闭：以最近一轮可见表格为预览来源；先确认用户本条消息明确指向该表格，再写入；不调用任何 `agent_memory_*`。
 
 把最终确认表格中的所有角色整理成独立的 `bookshelf_character_upsert` 调用，并必须在同一次助手工具调用批次中一次性发出。不得等待某一张角色卡的结果后再发下一张；这样 App 可以在执行前合并展示完整影响对象，只进行一次写操作确认。
 
 收到整批业务结果后：
 
 1. 根据每个角色的真实工具结果，把对应 `apply_state` 分别更新为 `applied` 或 `failed`；写入失败时只记录失败事实，不伪造成功状态。
-2. 使用一次 `agent_memory_batch_upsert` 更新唯一 preview，并为每个角色写入一条 `apply_result`；把整批成功或失败结果的全部 receipt 统一放入 batch 顶层 `source_receipt_ids`，不要放进单个 item，同时把 preview 状态更新为 `confirmed`。
-3. 所有实际结果均已提交到 AgentMemory 后，再向用户汇总成功和失败项；不得对失败项盲目重试。
+2. 如果记忆启用：使用一次 `agent_memory_batch_upsert` 更新唯一 preview，并为每个角色写入一条 `apply_result`；把整批成功或失败结果的全部 receipt 统一放入 batch 顶层 `source_receipt_ids`，不要放进单个 item。
+   - 全部成功：preview 状态设为 `confirmed`。
+   - 任一失败：preview 状态设为 `partial`，失败角色保持 `failed`；允许用户只重试失败项，不要把部分失败写成 `confirmed`。
+3. 如果记忆关闭：跳过记忆提交，直接根据工具结果汇总，不声称状态已持久化。
+4. 汇总成功和失败项；不得对失败项盲目重试。用户明确要求重试时，只重试 `failed` 的角色，并复用已有卡片 id。
 
-整批业务写入完成但 AgentMemory 批量更新失败时，明确说明“角色卡已实际写入，但应用状态尚未同步”，并列出已实际写入和失败的角色；下次先用 `bookshelf_character_list/get` 与预览记忆对账，禁止盲目重复 upsert。App 不会在工具调用后替本 Skill 补写应用状态。
+整批业务写入完成但 AgentMemory 批量更新失败时（仅记忆启用时），明确说明“角色卡已实际写入，但应用状态尚未同步”，并列出已实际写入和失败的角色；下次先用 `bookshelf_character_list/get` 与预览记忆对账，禁止盲目重复 upsert。App 不会在工具调用后替本 Skill 补写应用状态。
 
 ## 入口和书籍确认
 
@@ -293,25 +314,30 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 
 只有用户已经明确选择范围和强度时，才可以继续读取正文并生成角色卡表格。不要因为请求范围小、简介很清晰、已有缓存充足或用户说“直接生成”就跳过范围和强度选择。
 
-### 第四步：按确定性规则生成扫描窗口
+### 采样优先级（先判断，再选预算）
 
-扫描窗口必须由范围和强度确定，不要每次临场随机选择。
+每一轮开始前先判断走哪种模式：
+
+1. **追读模式**：已有候选角色名/别名，来源包括入口上下文、用户点名、书籍简介、已有角色卡、上一个采样窗口。先用 `bookshelf_text_search` 定位，再只读命中章节。
+2. **探索模式**：没有任何候选名。先用下面的确定性窗口发现角色；发现名字后切换到追读模式。
+3. 同一轮只能选一种预算；**追读预算替换探索预算，不叠加**。
+4. 追读时，命中章节前后各补 1 章并合并相邻命中，形成连续窗口；不要只读孤立单章。
+
+### 第四步：按确定性规则生成探索窗口
+
+探索窗口只在“没有候选名”时使用。窗口必须由范围和强度确定，不要每次临场随机选择。
 
 输入相同的 `range_start/range_end/mode` 时，应该生成相同的窗口。窗口都是连续章节区间，允许重叠窗口合并。
 
-规则：
+探索总预算：
 
-- `fast`：
-  - 读取范围开头最多 10 章。
-  - 如果范围小于等于 12 章，则连续读取完整范围。
-- `balanced`：
-  - 范围小于等于 30 章：连续读取完整范围。
-  - 范围大于 30 章：取三个连续窗口：范围开头 8 章、范围中段 8 章、范围末尾 8 章。
-  - 窗口重叠时合并。
-- `deep`：
-  - 范围小于等于 60 章：连续读取完整范围。
-  - 范围大于 60 章：每 30 章取一个 8 章连续窗口，并包含范围开头和末尾窗口。
-  - 发现疑似重要角色、别名混淆或身份反转时，可以补读相邻 3-5 章，但必须把补读窗口记录到 `scan_state.completed_windows` 中。
+- `fast`：最多 12 章。范围 ≤12 章时连续读完；否则读范围开头 10 章。
+- `balanced`：最多 30 章。范围 ≤30 章时连续读完；否则取三个 8 章窗口：范围开头 8 章、以中点为心的 8 章、范围末尾 8 章；重叠时合并。
+- `deep`：最多 60 章。范围 ≤60 章时连续读完；否则取最多 7 个 8 章窗口，按范围均匀分布并包含开头和末尾；补读也计入 60 章预算。
+
+中点窗口公式：`center = (start + end) / 2`（整数除法），窗口为 `[center - 3, center + 4]`，再按范围边界裁剪。
+
+均匀窗口公式（deep）：`start_i = start + round(i * (rangeSize - 8) / 6)`，`i = 0..6`，得到最多 7 个 8 章窗口。
 
 示例：范围 1-100、`balanced`，窗口应稳定为：
 
@@ -325,9 +351,13 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 - 106-113
 - 143-150
 
-### 第四步补充：用正文搜索定位角色章节
+有候选名时不要跑探索窗口；直接用下面的追读模式。
 
-一旦拿到候选角色名或别名（来自用户点名、书籍简介、已有角色卡，或前一个采样窗口），优先用 `bookshelf_text_search` 定位该角色在哪些章节出现，再只读这些章节。不要在没有候选名时凭猜测搜索。
+### 追读模式：用正文搜索定位角色章节
+
+在追读模式下，一旦有候选角色名或别名，优先用 `bookshelf_text_search` 定位该角色在哪些章节出现，再只读这些章节。不要在没有候选名时凭猜测搜索。
+
+追读预算：`fast` 每个角色最多 6 章，`balanced` 最多 12 章，`deep` 最多 20 章。该预算替换探索预算，不叠加。
 
 调用要点：
 
@@ -359,7 +389,7 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 5. 结尾：已扫描范围内最后 2 个命中章节。
 6. 合并去重后按章节号排序。
 
-单轮读取上限：
+追读预算（与探索预算不叠加）：
 
 - `fast`：每个角色最多 6 章。
 - `balanced`：每个角色最多 12 章。
@@ -407,7 +437,10 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 
 判断必须来自正文内容。正文没有明确支持时，用 `unknown` 或留空，不要脑补。
 
-每个正文窗口完成后，必须先用一次非空 `agent_memory_batch_upsert` 保存本窗口新增或变化的候选观察，并更新同一个 manifest；顶层 `source_receipt_ids` 必须包含本窗口全部成功正文回执。写入失败时停止继续采样，说明仍可从上一次已确认的 manifest 恢复；不得跳过保存后继续，也不得把未保存观察用于最终预览。
+每个正文窗口完成后：
+
+- 如果记忆启用：必须先用一次非空 `agent_memory_batch_upsert` 保存本窗口新增或变化的候选观察，并更新同一个 manifest；顶层 `source_receipt_ids` 必须包含本窗口全部成功正文回执。写入失败时停止继续采样，说明仍可从上一次已确认的 manifest 恢复；不得跳过保存后继续，也不得把未保存观察用于最终预览。
+- 如果记忆关闭：跳过记忆写入，只在聊天中记录本窗口的已读章节和候选观察，并在最终结果中说明本次不可恢复。
 
 ### 第七步：合并为主要角色候选
 
@@ -423,9 +456,14 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 
 如果某角色只在一个采样窗口短暂出现，即使名字明确，也不要生成角色卡，除非正文强烈暗示其为主线核心。
 
-### 第八步：保存可恢复预览
+### 第八步：生成可审核预览
 
-所有计划采样窗口都完成且对应记忆写入成功后，先整理最终待审核角色卡，再用 `agent_memory_upsert` 保存唯一 `memory_type=preview` 记忆并把状态设为 `ready`。只有该写入成功后才能输出可见表格和应用确认按钮；后续修订必须复用搜索返回的同一记忆 id，不得用隐藏载荷或客户端后处理代替。
+所有计划采样窗口都完成后：
+
+- 如果记忆启用且对应记忆写入成功，先整理最终待审核角色卡，再用 `agent_memory_upsert` 保存唯一 `memory_type=preview` 记忆并把状态设为 `ready`。只有该写入成功后才能输出可见表格和应用确认按钮；后续修订必须复用搜索返回的同一记忆 id，不得用隐藏载荷或客户端后处理代替。
+- 如果记忆关闭，直接基于本轮已读章节整理待审核表格；不调用 `agent_memory_*`，并在表格后说明“记忆已关闭，本次不支持中断续扫”。
+
+以下记忆结构只在记忆启用时使用；记忆关闭时跳过，不创建 manifest/candidate/preview/apply_result。
 
 所有角色卡记忆固定使用：
 
@@ -439,7 +477,7 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 
 1. `manifest`：唯一一条，保存 `requested_range/scan_mode/planned_windows/completed_windows/continuous_scanned_until/last_sampled_chapter/book_total_chapters/cached_until/pending_candidates/next_suggestion/scan_status`。
 2. `candidate`：每名主要角色候选一条，保存别名、角色位置、出现连续性、正文证据章节、证据不足和待补读问题；不保存长原文。
-3. `preview`：唯一一条，保存当前最终待审核卡片的完整字段、生成依据范围、状态 `ready|revised|confirmed`，以及每个角色的 `pending|applied|failed` 应用状态。
+3. `preview`：唯一一条，保存当前最终待审核卡片的完整字段、生成依据范围、状态 `ready|revised|applying|partial|confirmed`，以及每个角色的 `pending|applied|failed` 应用状态。
 4. `apply_result`：每次真实角色卡写入的结果摘要、业务写入 receipt 和最近更新时间；不得把计划写入伪装成结果。
 
 写入规则：
@@ -448,8 +486,8 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 - 最终预览或用户修订只更新同一条 preview；纯用户修订不虚构正文回执。
 - 重试前先查询最新记忆并按 id 合并本轮变化，避免同一 manifest、candidate 或 preview 产生副本。
 - 抽样窗口不等于连续扫描。除非确实连续读取 1-N 章，否则 `continuous_scanned_until` 为 0 或最后一个真实连续章号。
-- `completed_windows` 只记录成功完整读取且已被 AgentMemory 写入结果确认的窗口，包括动态补读；`last_sampled_chapter` 不代表中间章节都读过。
-- AgentMemory 写入失败时保留上一次已确认状态，明确当前预览尚未建立，不输出应用确认按钮，也不继续读取更多正文。
+- `completed_windows` 只记录成功完整读取且已被 AgentMemory 写入结果确认的窗口，包括动态补读（仅记忆启用时）；`last_sampled_chapter` 不代表中间章节都读过。
+- AgentMemory 写入失败时（仅记忆启用时）保留上一次已确认状态，明确当前预览尚未建立，不输出应用确认按钮，也不继续读取更多正文。
 - 不输出 XML、隐藏 JSON 或其它私有协议；记忆参数只存在于工具调用中，不复制到用户可见正文。
 - 用户修改、删除、合并或补充上一轮表格时，先查询唯一 preview，将修改后的完整卡片列表写回同一 id 并标记 `revised`；写入成功后再展示新版完整表格和确认按钮。
 
@@ -509,6 +547,31 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 
 可见表格后必须按全局交互协议提供一个“应用角色卡”的确认交互。用户点击应用后，再根据聊天中最终确认的角色卡，在同一次助手工具调用批次中发出全部写入调用。
 
+确认交互必须使用下面的固定结构，不要自造 id 或 prompt_template：
+
+```legado-interaction
+{
+  "version": 1,
+  "id": "character_card_apply_confirm",
+  "type": "confirm",
+  "title": "应用角色卡",
+  "description": "将把以上 N 个角色写入《书名》；同名角色会更新，不会删除其他角色。",
+  "submit": {
+    "label": "应用角色卡",
+    "prompt_template": "确认应用上面这些角色卡"
+  },
+  "cancel": {
+    "label": "暂不应用",
+    "prompt_template": "暂不应用，保留待审核表格"
+  }
+}
+```
+
+- `id` 固定为 `character_card_apply_confirm`。
+- `prompt_template` 固定为 `确认应用上面这些角色卡`；应用阶段的 `APPLY_CONFIRM` 判定以此为准。
+- 描述里的 N 和书名必须与实际表格一致。
+- 该块必须紧跟在 Markdown 表格之后；不能只有文字询问，也不能省略。
+
 生成可见表格后不要只用自然语言询问“是否应用”“要不要写入”来替代按钮。自然语言说明可以保留，但确认交互不能省略。
 
 首次生成表格时，最终回复不能包含“已应用”“已写入”“已保存”“已启用”“成功应用”等完成写库语义，只能说明“以下是待审核的角色卡表格”。如果没有输出表格，就不要输出确认块，应该重新输出表格。
@@ -565,8 +628,8 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 
 - 需要选择采样强度、补读或应用角色卡时，按全局交互协议输出对应选择或确认控件。
 - 首次角色卡生成必须先停在扫描范围选择；范围明确后再选择采样强度；范围和强度都明确后才读取正文。
-- 本 Skill 必须在预览阶段读取角色卡 AgentMemory；每个正文窗口先更新候选与唯一 manifest，最终预览再写入唯一 preview，成功后才输出待审核表格。
-- 整批角色卡写入结果返回后，必须由本 Skill 使用一次 `agent_memory_batch_upsert` 更新各角色的 `apply_state`；业务写入和状态提交是两个可核验结果，不能假设 App 会自动补写。
+- 如果记忆启用，本 Skill 必须在预览阶段读取角色卡 AgentMemory；每个正文窗口先更新候选与唯一 manifest，最终预览再写入唯一 preview，成功后才输出待审核表格。如果记忆关闭，跳过全部记忆读写，以聊天中可见表格为唯一状态来源。
+- 如果记忆启用，整批角色卡写入结果返回后，必须由本 Skill 使用一次 `agent_memory_batch_upsert` 更新各角色的 `apply_state`；业务写入和状态提交是两个可核验结果，不能假设 App 会自动补写。记忆关闭时直接根据工具结果汇总。
 - 不生成任何隐藏业务协议，也不调用未声明的旁路能力。
 
 ## 质量约束
@@ -595,12 +658,12 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 
 1. 如果入口已带当前书上下文，直接使用；否则调 `bookshelf_current_book_get` 确认当前书。
 2. 调 `bookshelf_character_list` 查看已有角色卡。
-3. 调 `bookshelf_chapter_list`、缓存/字数工具，并用 `agent_memory_search` 读取当前书 `domain=character_card` 的工作状态。
+3. 调 `bookshelf_chapter_list`、缓存/字数工具；如果记忆启用，再用 `agent_memory_search` 读取当前书 `domain=character_card` 的工作状态；记忆关闭时跳过。
 4. 如果缓存不足，提醒用户先缓存足够章节，不代办缓存。
 5. 输出扫描范围选择交互，当前轮次结束，等待用户选择范围或输入指定范围。
 6. 范围明确后输出采样强度选择交互，当前轮次结束，等待用户选择 `快速`、`平衡` 或 `深入`。
 7. 范围和强度都明确后，按确定性窗口读取连续正文并生成主要角色候选。
-8. 最终 preview 记忆写入成功后，在聊天中展示角色卡表格，并紧跟 `character_card_apply_confirm` 确认块；不附加隐藏业务数据。
+8. 记忆启用时，最终 preview 记忆写入成功后在聊天中展示角色卡表格；记忆关闭时直接展示表格。两种情况都必须紧跟 `character_card_apply_confirm` 确认块；不附加隐藏业务数据。
 9. 当前轮次结束，等待用户点击应用按钮或继续要求修改。
 10. 下一轮收到“确认应用上面这些角色卡”后，才调用写入工具并回复已应用结果。
 
@@ -620,9 +683,9 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 ### 用户点击“应用”
 
 1. 确认当前轮次是用户要求应用上面这些角色卡，而不是继续修改或询问。
-2. 调用 `agent_memory_search` 读取唯一 `memory_type=preview`，核对它与用户最后确认的表格，并整理将写入的角色列表。
+2. 如果记忆启用，调用 `agent_memory_search` 读取唯一 `memory_type=preview`，核对它与用户最后确认的表格，并整理将写入的角色列表；记忆关闭时以最近一轮可见表格为准。
 3. 在同一次助手工具调用批次中，为每个角色分别发出 `bookshelf_character_upsert`；不得写一张、更新一次记忆后再写下一张。不存在角色卡业务草稿保存或草稿应用工具。
-4. 整批结果返回后，使用一次 `agent_memory_batch_upsert` 写入各角色的 `apply_state` 和 `apply_result`，并在 batch 顶层 `source_receipt_ids` 传入全部结果 receipt；状态提交完成后再回复成功和失败项。结果展示继续使用中文性别和中文角色定位，不展示内部代号。
+4. 如果记忆启用，整批结果返回后使用一次 `agent_memory_batch_upsert` 写入各角色的 `apply_state` 和 `apply_result`，并在 batch 顶层 `source_receipt_ids` 传入全部结果 receipt；状态提交完成后再回复成功和失败项。记忆关闭时跳过记忆提交，直接回复结果。结果展示继续使用中文性别和中文角色定位，不展示内部代号。
 
 ## 回复风格
 

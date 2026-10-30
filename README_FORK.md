@@ -92,13 +92,16 @@
 
 #### 角色卡 Skill 接入
 
-`assets/skills/character_card_generate.md` 已升级到版本 23：
+`assets/skills/character_card_generate.md` 已升级到版本 24：
 
 - `mcp_capabilities` 增加 `bookshelf.search_content`
 - preview 阶段允许工具增加 `bookshelf_text_search`
 - 新增"用正文搜索定位角色章节"流程：拿到角色名/别名后一次性搜索，按命中章节选读
 - 高频主角按确定性规则稀疏采样（fast 6 章 / balanced 12 章 / deep 20 章），避免把上百个命中章节读完
 - 预览与应用硬门禁：扫描强度不等于写入授权，必须先展示待审核表格并等待明确应用确认
+- 记忆关闭时自动降级为纯聊天流程，不再阻塞或产生待写入告警
+- 探索预算与追读预算分离，避免窗口数与单轮上限互相矛盾
+- 应用确认块提供固定 JSON 结构，部分写入失败标记为 `partial` 并支持只重试失败项
 
 
 #### 改动清单
@@ -108,7 +111,7 @@
 | `app/src/main/java/io/legado/app/web/mcp/BookshelfMcpTools.kt` | 工具定义 + `call()` 分发 + 扫描实现 |
 | `app/src/main/java/io/legado/app/web/mcp/McpTextQuery.kt` | 新增纯匹配器（关键词/正则、计数、片段） |
 | `app/src/main/java/io/legado/app/web/mcp/McpInternalToolCatalog.kt` | 新增能力 `bookshelf.search_content` |
-| `app/src/main/assets/skills/character_card_generate.md` | 版本 23：声明搜索能力、接入选章流程、高频主角稀疏采样与预览/应用硬门禁 |
+| `app/src/main/assets/skills/character_card_generate.md` | 版本 24：搜索选章、稀疏采样、预览/应用硬门禁、记忆关闭降级与部分失败状态 |
 | `app/src/test/java/io/legado/app/web/mcp/McpTextQueryTest.kt` | 匹配与片段单元测试 |
 | `docs/MCP_API.md` | 工具总览、能力分组、调用示例 |
 | `scripts/test_mcp_api.py` | `EXPECTED_TOOLS` 与只读用例 |
