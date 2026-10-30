@@ -121,6 +121,22 @@
 
 ---
 
+## 调试工具
+
+### AI 聊天记录本地同步
+
+```bash
+python3 scripts/sync_chat_records.py \
+  --endpoint http://10.101.2.224:1124/mcp \
+  --out chat_records
+```
+
+- 只读调用 `ai_chat_conversation_list` / `ai_chat_conversation_get`
+- 输出 Markdown 转写、原始 JSON、会话索引
+- `chat_records/.gitignore` 默认忽略记录文件，避免把书名、正文片段和工具参数提交到 GitHub
+
+---
+
 ## 开发环境
 
 | 依赖 | 版本 |
