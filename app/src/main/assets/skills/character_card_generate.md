@@ -3,7 +3,7 @@ id: character_card_generate
 name: 角色卡生成
 description: 基于指定书籍和章节范围采样阅读原文，生成主要角色的待审核角色卡。
 scope: AGENT
-version: 25
+version: 27
 suggestions: 给当前书生成角色卡|从上次继续扫描角色卡|指定章节范围生成角色卡
 mcp_capabilities: bookshelf.query|bookshelf.read_content|bookshelf.search_content|bookshelf.cache_status|bookshelf.manage_characters|ai.memory
 conversation_group: 书籍相关
@@ -86,9 +86,13 @@ hook.core.memory_flush: {"watch_tools":["bookshelf_text_window_get","bookshelf_c
 
 不要混用“第几章”和“索引”；回复用户时统一用 1-based 章号。
 
+章号必须直接使用工具返回的 `chapter_number` 或 `title` 前缀，不要用 `index` 自己心算。工具没有返回 `chapter_number` 时，用 `index + 1` 并标明计算依据。
+
 ### 2.3 缓存检查
 
 - 开始采样前必须用 `bookshelf_cache_status_get` 检查目标范围。
+- `bookshelf_cache_status_get` 单次最多返回 500 章；`truncated_by_mcp=true` 时必须用 `next_start` 继续，直到 `false` 或覆盖到 `book.total_chapter_num`。没有查完不得说“全书已缓存”。
+- 汇总时用 `total_chapters`、`returned`、`cached_count`、`missing_count` 说明覆盖；`next_start` 为空才代表当前查询到底。
 - 只有少量章节可读时，不要硬生成完整角色卡；建议用户先缓存，不要代用户下载。
 - 用户明确接受“只基于当前已缓存章节生成临时结果”时可以继续，但必须在结果中说明覆盖范围。
 - 目录总数可以从 `bookshelf_book_get` 获取；需要具体章节范围时再调 `bookshelf_chapter_list`。
@@ -120,8 +124,9 @@ deep 均匀窗口：`start_i = start + round(i*(rangeSize-8)/6)`，`i=0..6`。
 
 ### 3.2 追读模式：正文搜索
 
-- 一次调用传入主角名和全部别名：`queries=["角色名","别名1","别名2"]`，最多 10 个；不要为每个别名分别调用。
-- 默认 `include_snippets=false`；需要确认“同名但不是同一人”时，才用很小的 `snippet_chars` 打开片段。
+- 一次调用传入主角名和全部别名：`queries=["角色名","别名1","别名2"]`，最多 10 个；不要为每个别名分别调用。先给足 `max_matched_chapters`，需要继续时用 `next_start_chapter_index` 续扫，不要重新发起第二个 `bookshelf_text_search`。
+- 默认 `include_snippets=false`。如果只是为了确认命中上下文，直接 `include_snippets=true`、`snippet_chars=20`、`snippets_per_chapter=1`，一次拿到章节+片段；不要随后再用 `chapter_snippets_get` 重复读。
+- 同一章节不要同时用 `bookshelf_text_window_get` 和 `bookshelf_chapter_snippets_get`；优先窗口，片段只用于核对同名/别名。每 4 个片段折算 1 章追读预算，单轮最多 5 个片段；片段和窗口的章节数合并计入追读预算。
 - 默认 `apply_replace=false`；用户明确要求按净化后文本搜索时才打开。
 - 范围默认当前书已缓存章节；已知范围时用 `start_chapter_index`/`end_chapter_index` 收窄。
 - 短别名是主名子串时会重复计数（例如“松浦”与“松浦源一郎”）。用 `chapter_indexes` 的并集判断章节覆盖，`total_matches` 只用于单别名内部排序；短姓氏/别名必须用片段或正文确认，不能只看计数。
@@ -173,6 +178,10 @@ deep 均匀窗口：`start_i = start + round(i*(rangeSize-8)/6)`，`i=0..6`。
 5. 高频亲友、师长、队友、家族成员、组织成员。
 
 只在一个窗口短暂出现、名字明确但无持续影响的角色不建卡，除非正文强烈暗示其为主线核心。
+
+发现模式中，每个候选角色至少要读 1 个命中窗口（优先首次登场/密度最高）；只有搜索计数、没有读过正文的候选不能进入表格。
+
+更新已有角色卡时，旧别名也要按当前规则重新校验；不符合的不要自动沿用，需在预览中建议移除并等用户确认。
 
 角色数量上限：`fast` 3-5 张，`balanced` 5-10 张，`deep` 最多 15 张；指定角色模式只生成 1 张。超出时保留最重要的，其余在说明中列为“未生成”。
 
@@ -276,7 +285,7 @@ deep 均匀窗口：`start_i = start + round(i*(rangeSize-8)/6)`，`i=0..6`。
   "gender": "unknown|male|female",
   "role_tag": "unknown|male_lead|female_lead|male_support|female_support|passerby|other",
   "aliases": ["别称"],
-  "intro": "人物介绍，1-3 句话",
+  "intro": "人物介绍",
   "avatar_uri": null,
   "portrait_uri": null,
   "image_prompt": "外观提示词"
@@ -285,7 +294,7 @@ deep 均匀窗口：`start_i = start + round(i*(rangeSize-8)/6)`，`i=0..6`。
 
 - `id`：更新已有卡片时必传；新建时为 0 或省略。
 - `name`：正文中最稳定、最明确的姓名；不要把别名当主名。
-- `intro`：1-3 句话，不超过 200 字；不写超长小传。
+- `intro`：人物介绍，长度不限；只写正文支持或高度稳定的信息，不为凑长度编造。
 - `avatar_uri`/`portrait_uri`：默认 null，除非用户或工具明确提供 URI。
 - `image_prompt`：只写正文明确支持或高度稳定的外观/年龄/气质；没有线索时表格写“未提及”，写入空字符串。
 
@@ -332,6 +341,7 @@ deep 均匀窗口：`start_i = start + round(i*(rangeSize-8)/6)`，`i=0..6`。
 - 别称用顿号或逗号分隔；写入时拆成数组。
 - 已有卡片在表格后用一句话标注“将更新 / 将跳过”，不额外增加列。
 - 表格后紧跟固定确认块；没有表格不输出确认块。
+- 提到章节时用工具返回的 `chapter_number` 或 `title` 前缀，不要用 `index` 心算，也不要写错位。
 - 只有“分析主要角色”而没有“生成/创建”意图时，可以只给结论和可选表格，不输出应用按钮。
 
 确认块固定结构，不要自造 id 或口令：
@@ -367,8 +377,8 @@ deep 均匀窗口：`start_i = start + round(i*(rangeSize-8)/6)`，`i=0..6`。
 2. `agent_memory_status_get` 决定记忆流程；记忆关闭时说明降级。
 3. `bookshelf_character_list` 查重；命中则准备“更新已有”。
 4. `bookshelf_cache_status_get` 确认当前书缓存范围。
-5. `bookshelf_text_search` 搜索主名 + 别名，范围=已缓存章节；默认 balanced。
-6. 按第 3.2 节选章，读命中窗口及前后 1 章；不读未命中章节。
+5. `bookshelf_text_search` 一次搜索主名 + 别名，范围=已缓存章节；需要上下文时用 `include_snippets=true` 的小片段，不另调 snippets。
+6. 按第 3.2 节选章，优先一个连续窗口（命中章节及前后 1 章）；片段最多 5 个并折算追读预算；不读未命中章节。
 7. 生成 1 张待审核卡；记忆启用时先写 preview `ready`。
 8. 展示表格 + 确认块，本轮结束。
 9. 用户确认应用后，才批量 upsert；部分失败标记 `partial`，只重试失败项。
@@ -379,7 +389,7 @@ deep 均匀窗口：`start_i = start + round(i*(rangeSize-8)/6)`，`i=0..6`。
 2. 输出扫描范围选择，本轮结束。
 3. 范围明确后输出强度选择，本轮结束。
 4. 按探索预算读取窗口，记录观察，合并候选。
-5. 发现候选名后切换追读：搜索名字 + 别名，只补命中章节。
+5. 发现候选名后切换追读：搜索名字 + 别名，并为每个候选至少补读 1 个命中窗口，再进入表格。
 6. 按数量上限筛选主要角色；记忆启用时写 preview `ready`。
 7. 展示表格 + 确认块，本轮结束；用户确认后才写入。
 
@@ -418,5 +428,8 @@ deep 均匀窗口：`start_i = start + round(i*(rangeSize-8)/6)`，`i=0..6`。
 - 不在用户确认前写入，不声称已写入/已保存/已应用。
 - 不在没有可见表格时输出应用按钮；不在同一轮先写卡再补表格。
 - 表格里不展示 `male_lead` 等内部代号；不在用户可见内容里暴露英文确认口令。
-- 采样不足时明确说“需要继续采样/不建议生成”，不要硬生成。
+- 不凭 `index` 心算章号；缓存结论必须覆盖完整范围后才能说“全书已缓存”。
+- 发现模式中没有读过正文的候选不得建卡；每个候选至少读 1 个命中窗口。
+- 同一章节不同时用窗口和片段；片段最多 5 个并折算追读预算；搜索只发起一次，续扫用 `next_start_chapter_index`。
 - 记忆关闭时不要声称可恢复；记忆开启时不要把未落盘观察用于最终预览。
+- 采样不足时明确说“需要继续采样/不建议生成”，不要硬生成。

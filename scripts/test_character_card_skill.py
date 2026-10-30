@@ -19,7 +19,7 @@ class CharacterCardSkillPolicyTest(unittest.TestCase):
         cls.skill = SKILL_PATH.read_text(encoding="utf-8")
 
     def test_apply_batches_all_character_writes_before_results(self):
-        self.assertIn("version: 25", self.skill)
+        self.assertIn("version: 27", self.skill)
         self.assertIn("同一次助手工具调用批次中一次性发出", self.skill)
         self.assertIn("只进行一次写操作确认", self.skill)
 
@@ -125,6 +125,29 @@ class CharacterCardSkillPolicyTest(unittest.TestCase):
         self.assertIn("bookshelf_character_delete(ids=[...])", self.skill)
         self.assertIn("除 `legado-interaction` 交互块外", self.skill)
         self.assertIn("| 角色名称 | 性别 | 角色定位 | 别称 | 人物介绍 | 生图提示词 |", self.skill)
+
+    def test_intro_length_is_not_restricted(self):
+        self.assertNotIn("1-3 句话", self.skill)
+        self.assertNotIn("不超过 200 字", self.skill)
+        self.assertIn("`intro`：人物介绍，长度不限", self.skill)
+
+    def test_cache_paging_and_chapter_numbers_are_explicit(self):
+        self.assertIn("truncated_by_mcp=true", self.skill)
+        self.assertIn("next_start", self.skill)
+        self.assertIn("没有查完不得说“全书已缓存”", self.skill)
+        self.assertIn("chapter_number", self.skill)
+        self.assertIn("不要用 `index` 心算", self.skill)
+
+    def test_discovery_candidates_need_real_reading(self):
+        self.assertIn("每个候选角色至少要读 1 个命中窗口", self.skill)
+        self.assertIn("只有搜索计数、没有读过正文的候选不能进入表格", self.skill)
+        self.assertIn("旧别名也要按当前规则重新校验", self.skill)
+
+    def test_search_and_snippet_token_controls(self):
+        self.assertIn("不要重新发起第二个 `bookshelf_text_search`", self.skill)
+        self.assertIn("每 4 个片段折算 1 章追读预算", self.skill)
+        self.assertIn("单轮最多 5 个片段", self.skill)
+        self.assertIn("同一章节不要同时用 `bookshelf_text_window_get` 和 `bookshelf_chapter_snippets_get`", self.skill)
 
 
 if __name__ == "__main__":

@@ -92,7 +92,7 @@
 
 #### 角色卡 Skill 接入
 
-`assets/skills/character_card_generate.md` 已升级到版本 25：
+`assets/skills/character_card_generate.md` 已升级到版本 27：
 
 - `mcp_capabilities` 增加 `bookshelf.search_content`
 - preview 阶段允许工具增加 `bookshelf_text_search`
@@ -104,7 +104,10 @@
 - 应用确认块提供固定 JSON 结构，部分写入失败标记为 `partial` 并支持只重试失败项
 - 指定角色入口直接搜索缓存章节，不再强制询问范围；发现模式保留范围/强度选择
 - 章节号统一按 1-based 换算，已有角色卡按 name/aliases 去重并复用 id 更新
-- 单文件压缩到约 420 行；`references/` 拆分需要额外的 Agent Skill 包加载支持，暂未启用
+- 单文件约 430 行；`references/` 拆分需要额外的 Agent Skill 包加载支持，暂未启用
+- 去掉 `intro` 长度限制；缓存按 `next_start` 分页；MCP 结果新增 `chapter_number`
+- 发现模式每个候选至少读 1 个命中窗口；窗口和片段不重复读，片段折算追读预算
+- `AiChatClient` 改为累计一轮内所有模型调用的真实 token，不再只记录最后一次调用
 
 
 #### 改动清单
@@ -114,7 +117,7 @@
 | `app/src/main/java/io/legado/app/web/mcp/BookshelfMcpTools.kt` | 工具定义 + `call()` 分发 + 扫描实现 |
 | `app/src/main/java/io/legado/app/web/mcp/McpTextQuery.kt` | 新增纯匹配器（关键词/正则、计数、片段） |
 | `app/src/main/java/io/legado/app/web/mcp/McpInternalToolCatalog.kt` | 新增能力 `bookshelf.search_content` |
-| `app/src/main/assets/skills/character_card_generate.md` | 版本 25：指定角色/发现双模式、章节号换算、去重更新、分析/生成分离、别名与数量上限、回滚流程 |
+| `app/src/main/assets/skills/character_card_generate.md` | 版本 27：双模式、章节号换算、去重、分析/生成分离、缓存分页、候选补读、片段预算、真实 token 统计 |
 | `app/src/test/java/io/legado/app/web/mcp/McpTextQueryTest.kt` | 匹配与片段单元测试 |
 | `docs/MCP_API.md` | 工具总览、能力分组、调用示例 |
 | `scripts/test_mcp_api.py` | `EXPECTED_TOOLS` 与只读用例 |

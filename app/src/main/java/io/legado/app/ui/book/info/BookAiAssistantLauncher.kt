@@ -71,8 +71,9 @@ object BookAiAssistantLauncher {
             putExtra(
                 AiChatActivity.EXTRA_INITIAL_INPUT,
                 "为《${book.name}》中的角色「$name」创建角色卡。" +
-                    "请先读取书籍信息和已有角色卡，然后让我选择扫描范围；" +
-                    "确认范围后用正文搜索定位该角色的章节，只读命中章节。"
+                    "这是指定角色模式：直接使用当前书已缓存章节，不要再询问扫描范围或强度；" +
+                    "先查已有角色卡，再用正文搜索定位该角色的章节，只读命中章节。" +
+                    "采样完成后先展示待审核表格，等我确认后再写入。"
             )
             putExtra(AiChatActivity.EXTRA_EXPAND_SUGGESTIONS, true)
         }

@@ -1025,6 +1025,7 @@ object BookshelfMcpTools {
             items.add(
                 mapOf(
                     "index" to chapter.index,
+                    "chapter_number" to (chapter.index + 1),
                     "title" to chapter.title,
                     "has_content" to (rawContent != null),
                     "content_chars" to (block?.length ?: 0),
@@ -1116,6 +1117,7 @@ object BookshelfMcpTools {
             items.add(
                 mapOf(
                     "index" to chapter.index,
+                    "chapter_number" to (chapter.index + 1),
                     "title" to chapter.title,
                     "has_content" to hasContent,
                     "head" to head,
@@ -1273,6 +1275,7 @@ object BookshelfMcpTools {
             chapterHits.add(
                 buildMap<String, Any?> {
                     put("index", chapter.index)
+                    put("chapter_number", chapter.index + 1)
                     put("title", chapter.title)
                     put("count", counts.values.sum())
                     put("hits", counts)
@@ -1391,12 +1394,15 @@ object BookshelfMcpTools {
             }
             mapOf(
                 "index" to chapter.index,
+                "chapter_number" to (chapter.index + 1),
                 "title" to chapter.title,
                 "has_content" to hasCache,
                 "is_volume" to chapter.isVolume
             )
         }
         val cachedCount = statuses.count { it["has_content"] == true }
+        val truncated = end - start > statuses.size
+        val nextStart = if (truncated) page.lastOrNull()?.index?.plus(1) else null
         return toolResult(
             ok = true,
             upstreamEndpoint = "native://bookshelf/cacheStatus",
@@ -1408,7 +1414,8 @@ object BookshelfMcpTools {
                 "returned" to statuses.size,
                 "cached_count" to cachedCount,
                 "missing_count" to (statuses.size - cachedCount),
-                "truncated_by_mcp" to (end - start > statuses.size),
+                "truncated_by_mcp" to truncated,
+                "next_start" to nextStart,
                 "chapters" to statuses
             )
         )
@@ -2403,6 +2410,7 @@ object BookshelfMcpTools {
     ): Map<String, Any?> {
         val map = linkedMapOf<String, Any?>(
             "index" to index,
+            "chapter_number" to (index + 1),
             "title" to title,
             "is_volume" to isVolume,
             "is_vip" to isVip,
