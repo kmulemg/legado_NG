@@ -92,11 +92,12 @@
 
 #### 角色卡 Skill 接入
 
-`assets/skills/character_card_generate.md` 已升级到版本 21：
+`assets/skills/character_card_generate.md` 已升级到版本 22：
 
 - `mcp_capabilities` 增加 `bookshelf.search_content`
 - preview 阶段允许工具增加 `bookshelf_text_search`
-- 新增"用正文搜索定位角色章节"流程：拿到角色名/别名后一次性搜索，按命中章节选读，不再机械通读中段/末尾窗口
+- 新增"用正文搜索定位角色章节"流程：拿到角色名/别名后一次性搜索，按命中章节选读
+- 高频主角按确定性规则稀疏采样（fast 6 章 / balanced 12 章 / deep 20 章），避免把上百个命中章节读完
 
 
 #### 改动清单
@@ -106,7 +107,7 @@
 | `app/src/main/java/io/legado/app/web/mcp/BookshelfMcpTools.kt` | 工具定义 + `call()` 分发 + 扫描实现 |
 | `app/src/main/java/io/legado/app/web/mcp/McpTextQuery.kt` | 新增纯匹配器（关键词/正则、计数、片段） |
 | `app/src/main/java/io/legado/app/web/mcp/McpInternalToolCatalog.kt` | 新增能力 `bookshelf.search_content` |
-| `app/src/main/assets/skills/character_card_generate.md` | 版本 21：声明搜索能力并接入选章流程 |
+| `app/src/main/assets/skills/character_card_generate.md` | 版本 22：声明搜索能力、接入选章流程与高频主角稀疏采样 |
 | `app/src/test/java/io/legado/app/web/mcp/McpTextQueryTest.kt` | 匹配与片段单元测试 |
 | `docs/MCP_API.md` | 工具总览、能力分组、调用示例 |
 | `scripts/test_mcp_api.py` | `EXPECTED_TOOLS` 与只读用例 |

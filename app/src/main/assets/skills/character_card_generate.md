@@ -3,7 +3,7 @@ id: character_card_generate
 name: 角色卡生成
 description: 基于指定书籍和章节范围采样阅读原文，生成主要角色的待审核角色卡。
 scope: AGENT
-version: 21
+version: 22
 suggestions: 给当前书生成角色卡|从上次继续扫描角色卡|指定章节范围生成角色卡
 mcp_capabilities: bookshelf.query|bookshelf.read_content|bookshelf.search_content|bookshelf.cache_status|bookshelf.manage_characters|ai.memory
 conversation_group: 书籍相关
@@ -329,6 +329,41 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 - 不要读取没有命中的章节来“碰运气”，也不要把整份命中清单贴给用户。
 - `missing_chapters` 大于 0 说明部分章节未缓存；必要时先向用户说明覆盖不足。`has_more=true` 时用 `next_start_chapter_index` 继续扫描，不要把一次返回当成全书结论。
 - 搜索结果只用于选章；角色卡事实仍必须来自实际读取的连续正文。
+
+#### 高频主角的稀疏采样
+
+主角或视角人物通常会在绝大多数章节命中。不要因为 `matched_chapters` 很多就把命中章节全部读完。
+
+先判断频率：
+
+- 如果 `matched_chapters / max(1, scanned_chapters) >= 0.4`，或 `matched_chapters >= 30`，按“高频角色”处理。
+- 如果 `matched_chapters <= 15`，按“稀疏角色”处理，可以直接读取大部分命中章节（单轮最多 10 章）。
+
+高频角色按以下确定性规则抽样，输入相同结果时选出的章节必须相同：
+
+1. 首次登场：`chapter_indexes` 前 2 章，各补读前后 1 章用于确认身份和关系。
+2. 别名首次出现：每个别名第一次命中的章节，各补读前后 1 章，用于确认别称归属。
+3. 阶段代表：从首次命中开始，每 50 章取该区间内第一个命中章节；用于覆盖中后段变化。
+4. 密度峰值：按 `count` 取最高的 2 章，用于捕捉关键冲突、关系反转或身份揭露。
+5. 结尾：已扫描范围内最后 2 个命中章节。
+6. 合并去重后按章节号排序。
+
+单轮读取上限：
+
+- `fast`：每个角色最多 6 章。
+- `balanced`：每个角色最多 12 章。
+- `deep`：每个角色最多 20 章。
+
+超出上限时，优先保留首次登场、别名首次出现和密度峰值，再删除阶段代表。
+
+分页策略：
+
+- 高频角色：第一页命中已经足够抽样，不要为了收集全部命中继续翻页。
+- 稀疏角色：如果 `has_more=true`，用 `next_start_chapter_index` 继续扫描，直到找全或达到 10 章命中。
+- 同一章节被多个角色命中时只读一次，观察结果复用到所有相关角色。
+- 已读章节和已记录窗口必须写入 manifest 的 `completed_windows`；用户选择“从上次继续”时不要重复读取。
+
+只有用户明确要求“整本精读”“逐章分析”时才扩大单轮上限，并仍需分页和记录进度。
 
 ### 第五步：分层读取连续原文
 

@@ -19,7 +19,7 @@ class CharacterCardSkillPolicyTest(unittest.TestCase):
         cls.skill = SKILL_PATH.read_text(encoding="utf-8")
 
     def test_apply_batches_all_character_writes_before_results(self):
-        self.assertIn("version: 21", self.skill)
+        self.assertIn("version: 22", self.skill)
         self.assertIn("同一次助手工具调用批次中一次性发出", self.skill)
         self.assertIn("只进行一次写操作确认", self.skill)
 
@@ -34,6 +34,15 @@ class CharacterCardSkillPolicyTest(unittest.TestCase):
         self.assertIn("bookshelf_text_search", self.skill)
         self.assertIn("只对选中的章节调用", self.skill)
         self.assertIn("不要读取没有命中的章节", self.skill)
+
+    def test_high_frequency_characters_use_deterministic_sparse_sampling(self):
+        self.assertIn("高频主角的稀疏采样", self.skill)
+        self.assertIn("matched_chapters / max(1, scanned_chapters) >= 0.4", self.skill)
+        self.assertIn("每 50 章取该区间内第一个命中章节", self.skill)
+        self.assertIn("`fast`：每个角色最多 6 章", self.skill)
+        self.assertIn("`balanced`：每个角色最多 12 章", self.skill)
+        self.assertIn("`deep`：每个角色最多 20 章", self.skill)
+        self.assertIn("高频角色：第一页命中已经足够抽样", self.skill)
 
 
 if __name__ == "__main__":
