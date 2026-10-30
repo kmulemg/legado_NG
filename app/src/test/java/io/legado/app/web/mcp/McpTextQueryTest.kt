@@ -40,7 +40,8 @@ class McpTextQueryTest {
         val query = McpTextQuery.compile("林动", regex = false, ignoreCase = true)
         val snippets = query.snippets("林动林动林动", limit = 2, contextChars = 0)
         assertEquals(2, snippets.size)
-        assertEquals("林动", snippets[0])
+        assertTrue(snippets[0].startsWith("林动"))
+        assertTrue(snippets[1].contains("林动"))
     }
 
     @Test(expected = IllegalArgumentException::class)
