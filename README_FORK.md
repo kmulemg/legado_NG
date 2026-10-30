@@ -12,11 +12,11 @@
 
 ## 当前目标
 
-### 1. 新增 MCP 工具：`bookshelf_text_search`（正文搜索）
+### 1. 新增 MCP 工具：`bookshelf_text_search`（单本正文搜索）
 
-让 App 内置 AI 和外部 MCP 客户端能够在**已缓存 / 本地**的章节正文中检索关键词或正则，并返回章节位置与上下文片段。
+**用途**：让 AI 在做角色卡、扫书等任务时，先在**一本书**里定位"某角色出现在哪些章节"，然后只读取这些章节，避免通读全书浪费 token。
 
-**状态**：可行性已确认，设计已定稿，尚未实现。
+**状态**：已实现，待编译与真机验证。
 
 #### 为什么可行
 
@@ -28,27 +28,32 @@
 
 | 约束 | 说明 |
 | --- | --- |
+| 仅单本 | 不支持跨书架全局搜索；全局搜索需要异步任务，留到二期 |
 | 无全文索引 | 正文不在 SQLite 中，只能逐章读文件扫描 |
 | 仅限已缓存/本地 | 与现有 MCP 读接口一致，不主动联网抓取未缓存章节 |
-| 同步协议 | MCP 当前是同步 JSON-RPC，无任务/SSE，必须限制单次扫描量并支持分页 |
-| 成本可控 | 默认扫描 200 章、命中 50 条即停，返回 `has_more` 和下一页起点 |
+| 同步协议 | 默认扫描整本缓存，但命中上限 500 章或 15 秒即停，返回 `has_more` 与续扫位置 |
+| 默认不给正文 | `include_snippets=false`，只返回章节命中清单，token 成本最低 |
 
-#### 接口设计（草案）
+#### 接口设计
 
-工具名：`bookshelf_text_search`，只读（`McpToolSideEffect.READ`），归属书架模块。
+工具名：`bookshelf_text_search`，只读（`McpToolSideEffect.READ`），归属书架模块，能力项 `bookshelf.search_content`。
 
 参数：
 
 | 参数 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `work_key` / `book_url` / `name`+`author` | string | — | 书籍定位，复用 `resolveBook` |
-| `query` | string | 必填 | 关键词 |
+| `query` | string | — | 单个关键词或正则 |
+| `queries` | string[] | — | 最多 10 个关键词，用于一次传入角色名 + 全部别名 |
 | `regex` | boolean | false | 正则搜索 |
-| `match_case` | boolean | false | 区分大小写 |
+| `ignore_case` | boolean | true | 忽略大小写 |
 | `start_chapter_index` | int | 0 | 起始章节（含） |
-| `max_chapters` | int | 200 | 单次扫描上限，最大 2000 |
-| `max_results` | int | 50 | 命中上限，最大 200 |
-| `context_chars` | int | 40 | 命中点左右各取字符数 |
+| `end_chapter_index` | int | 全部 | 结束章节（含） |
+| `max_matched_chapters` | int | 200 | 命中章节上限，最大 500 |
+| `include_snippets` | boolean | false | 是否返回上下文片段 |
+| `snippet_chars` | int | 30 | 片段左右各取字符数，最大 200 |
+| `snippets_per_chapter` | int | 2 | 每章每个查询的片段数，最大 5 |
+| `time_budget_ms` | int | 15000 | 扫描时间预算，最大 60000 |
 | `apply_replace` | boolean | false | 是否套用本书净化规则 |
 
 返回要点：
@@ -56,39 +61,53 @@
 ```json
 {
   "book": { "work_key": "...", "name": "...", "author": "..." },
-  "scanned_chapters": 200,
-  "total_chapters": 3120,
-  "cached_chapters_in_range": 180,
-  "matched_chapters": 3,
-  "total_matches": 7,
-  "results": [
+  "queries": [
+    { "query": "林动", "matched_chapters": 87, "total_matches": 431, "chapter_indexes": [3, 5, 7] },
+    { "query": "小炎", "matched_chapters": 12, "total_matches": 30, "chapter_indexes": [3, 9] }
+  ],
+  "scanned_chapters": 3120,
+  "missing_chapters": 0,
+  "matched_chapters": 90,
+  "total_matches": 461,
+  "chapters": [
     {
-      "chapter_index": 42,
-      "chapter_title": "第四十二章 夜行",
-      "match_count": 2,
-      "matches": [
-        { "position": 1830, "snippet": "……上下文片段……" }
-      ]
+      "index": 3,
+      "title": "第三章 青阳镇",
+      "count": 2,
+      "hits": { "林动": 2 }
     }
   ],
-  "has_more": true,
-  "next_start_chapter_index": 200
+  "has_more": false,
+  "next_start_chapter_index": null
 }
 ```
 
 明确不做：
 
-- 不返回整章正文（由 `bookshelf_chapter_content_get` 负责）
+- 不返回整章正文（由 `bookshelf_chapter_content_get` / `bookshelf_text_window_get` 负责）
 - 不联网补取未缓存章节
 - 不做简繁转换（避免 offset 与原文不一致）
 - 默认不套净化规则（显式开启 `apply_replace` 才生效）
+- 不跨书架搜索
+
+#### 角色卡 Skill 接入
+
+`assets/skills/character_card_generate.md` 已升级到版本 21：
+
+- `mcp_capabilities` 增加 `bookshelf.search_content`
+- preview 阶段允许工具增加 `bookshelf_text_search`
+- 新增"用正文搜索定位角色章节"流程：拿到角色名/别名后一次性搜索，按命中章节选读，不再机械通读中段/末尾窗口
+
 
 #### 改动清单
 
 | 文件 | 改动 |
 | --- | --- |
-| `app/src/main/java/io/legado/app/web/mcp/BookshelfMcpTools.kt` | 工具定义 + `call()` 分发 + 实现 |
+| `app/src/main/java/io/legado/app/web/mcp/BookshelfMcpTools.kt` | 工具定义 + `call()` 分发 + 扫描实现 |
+| `app/src/main/java/io/legado/app/web/mcp/McpTextQuery.kt` | 新增纯匹配器（关键词/正则、计数、片段） |
 | `app/src/main/java/io/legado/app/web/mcp/McpInternalToolCatalog.kt` | 新增能力 `bookshelf.search_content` |
+| `app/src/main/assets/skills/character_card_generate.md` | 版本 21：声明搜索能力并接入选章流程 |
+| `app/src/test/java/io/legado/app/web/mcp/McpTextQueryTest.kt` | 匹配与片段单元测试 |
 | `docs/MCP_API.md` | 工具总览、能力分组、调用示例 |
 | `scripts/test_mcp_api.py` | `EXPECTED_TOOLS` 与只读用例 |
 

@@ -3,9 +3,9 @@ id: character_card_generate
 name: 角色卡生成
 description: 基于指定书籍和章节范围采样阅读原文，生成主要角色的待审核角色卡。
 scope: AGENT
-version: 20
+version: 21
 suggestions: 给当前书生成角色卡|从上次继续扫描角色卡|指定章节范围生成角色卡
-mcp_capabilities: bookshelf.query|bookshelf.read_content|bookshelf.cache_status|bookshelf.manage_characters|ai.memory
+mcp_capabilities: bookshelf.query|bookshelf.read_content|bookshelf.search_content|bookshelf.cache_status|bookshelf.manage_characters|ai.memory
 conversation_group: 书籍相关
 conversation_title: 角色卡
 conversation_subject: auto
@@ -103,6 +103,7 @@ hook.core.memory_flush: {"watch_tools":["bookshelf_text_window_get","bookshelf_c
 - `bookshelf_book_list`：按书名、作者或关键词在书架中找书。
 - `bookshelf_character_list`：读取已有角色卡，避免重复生成。
 - `bookshelf_chapter_list`：读取目录和章节范围。
+- `bookshelf_text_search`：在已缓存或本地正文中定位角色名和别名，返回命中章节清单；用它决定读哪几章，不要整本通读。
 - `bookshelf_cache_status_get`：读取章节缓存状态和字数/缓存信息。
 - `bookshelf_text_window_get` 或 `bookshelf_chapter_content_get`：读取章节正文。
 - `agent_memory_search`：按当前书、`domain=character_card` 和具体 `memory_type` 读取扫描、候选、预览与应用状态。
@@ -312,6 +313,22 @@ AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 S
 - 69-76
 - 106-113
 - 143-150
+
+### 第四步补充：用正文搜索定位角色章节
+
+一旦拿到候选角色名或别名（来自用户点名、书籍简介、已有角色卡，或前一个采样窗口），优先用 `bookshelf_text_search` 定位该角色在哪些章节出现，再只读这些章节。不要在没有候选名时凭猜测搜索。
+
+调用要点：
+
+- 一次调用传入角色主名和全部已知别名：`queries=["角色名","别名1","别名2"]`。不要为每个别名分别调用。
+- 默认 `include_snippets=false`，只拿章节命中清单，节约 token。只有需要确认“同名但不是同一个人”时，才用很小的 `snippet_chars` 打开片段核对。
+- `apply_replace=false`；除非用户明确要求按净化后的显示文本搜索。
+- 默认从第 0 章扫到最后一章；如果已有明确范围，用 `start_chapter_index` / `end_chapter_index` 收窄。
+- 结果里的 `queries[].matched_chapters` 和 `total_matches` 用于判断角色是否高频；`chapters[].hits` 用于区分主名和别名分别出现在哪些章节。
+- 选章优先顺序：首次登场章节、命中次数最高的章节、分布在中后段且能体现角色变化的章节。只对选中的章节调用 `bookshelf_text_window_get` 或 `bookshelf_chapter_content_get`。
+- 不要读取没有命中的章节来“碰运气”，也不要把整份命中清单贴给用户。
+- `missing_chapters` 大于 0 说明部分章节未缓存；必要时先向用户说明覆盖不足。`has_more=true` 时用 `next_start_chapter_index` 继续扫描，不要把一次返回当成全书结论。
+- 搜索结果只用于选章；角色卡事实仍必须来自实际读取的连续正文。
 
 ### 第五步：分层读取连续原文
 
