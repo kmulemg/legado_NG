@@ -3,7 +3,7 @@ id: character_card_generate
 name: 角色卡生成
 description: 基于指定书籍和章节范围采样阅读原文，生成主要角色的待审核角色卡。
 scope: AGENT
-version: 22
+version: 23
 suggestions: 给当前书生成角色卡|从上次继续扫描角色卡|指定章节范围生成角色卡
 mcp_capabilities: bookshelf.query|bookshelf.read_content|bookshelf.search_content|bookshelf.cache_status|bookshelf.manage_characters|ai.memory
 conversation_group: 书籍相关
@@ -119,6 +119,17 @@ preview 阶段禁止调用这些写工具：
 如果某个工具名虽然是 `get`，但说明里包含“创建”或“写入”，不要在 `preview` 阶段调用。
 
 AgentMemory 写入是上述业务写禁令的唯一例外，但只能保存本 Skill 的扫描工作状态；不得借记忆工具改写书籍、角色卡、缓存或其它业务数据。
+
+### 预览与应用之间的硬门禁
+
+扫描强度（快速/平衡/深入）只授权采样，不授权写入。无论记忆功能是否开启，采样完成后必须：
+
+1. 先在聊天中输出完整的待审核角色卡表格。
+2. 停止本轮，等待用户点击应用按钮或明确说“应用/写入上面这些角色卡”。
+3. 不得在采样完成的同一轮、同一批工具调用中调用 `bookshelf_character_upsert`。
+4. 没有展示过预览表格时，不得声称“与上一轮表格一致”，也不得写入。
+5. 用户只选择扫描范围或扫描强度，不构成应用确认。
+6. 如果已经误写入，必须立即说明实际写入对象和卡片 ID，并提示用户可以删除或回滚。
 
 ### apply 阶段允许工具
 

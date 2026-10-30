@@ -19,7 +19,7 @@ class CharacterCardSkillPolicyTest(unittest.TestCase):
         cls.skill = SKILL_PATH.read_text(encoding="utf-8")
 
     def test_apply_batches_all_character_writes_before_results(self):
-        self.assertIn("version: 22", self.skill)
+        self.assertIn("version: 23", self.skill)
         self.assertIn("同一次助手工具调用批次中一次性发出", self.skill)
         self.assertIn("只进行一次写操作确认", self.skill)
 
@@ -43,6 +43,13 @@ class CharacterCardSkillPolicyTest(unittest.TestCase):
         self.assertIn("`balanced`：每个角色最多 12 章", self.skill)
         self.assertIn("`deep`：每个角色最多 20 章", self.skill)
         self.assertIn("高频角色：第一页命中已经足够抽样", self.skill)
+
+    def test_preview_and_apply_are_hard_gated(self):
+        self.assertIn("预览与应用之间的硬门禁", self.skill)
+        self.assertIn("扫描强度（快速/平衡/深入）只授权采样，不授权写入", self.skill)
+        self.assertIn("不得在采样完成的同一轮、同一批工具调用中调用 `bookshelf_character_upsert`", self.skill)
+        self.assertIn("没有展示过预览表格时，不得声称", self.skill)
+        self.assertIn("用户只选择扫描范围或扫描强度，不构成应用确认", self.skill)
 
 
 if __name__ == "__main__":
