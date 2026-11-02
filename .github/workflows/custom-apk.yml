@@ -1,0 +1,137 @@
+name: Custom APK
+
+# 仅用于个人 fork 的 custom 分支：push 即产出可直接安装的 release APK，
+# 并把它挂到滚动 Release（tag: custom-latest）上，方便手机直接下载。
+# 该文件只存在于 custom 分支，不会进入 main / feature/PR 分支。
+
+on:
+  push:
+    branches:
+      - custom
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'chat_records/**'
+  workflow_dispatch:
+
+concurrency:
+  group: custom-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  ROLLING_TAG: custom-latest
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      RELEASE_KEY_STORE: ${{ secrets.RELEASE_KEY_STORE }}
+      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+      RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # versionCode 取自 git rev-list --count，必须完整历史
+          fetch-depth: 0
+
+      - name: 校验签名密钥
+        run: |
+          missing=0
+          for name in RELEASE_KEY_STORE RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD RELEASE_STORE_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::仓库 Secrets 缺少 $name，无法产出可安装的签名包"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "请先配置 4 个 Secrets：RELEASE_KEY_STORE(base64)、RELEASE_KEY_ALIAS、RELEASE_KEY_PASSWORD、RELEASE_STORE_PASSWORD"
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: 写入签名配置
+        run: |
+          # app/signing.properties 已在 .gitignore 中，仅存在于 runner 上
+          {
+            echo "RELEASE_STORE_FILE=key.jks"
+            echo "RELEASE_STORE_PASSWORD=$RELEASE_STORE_PASSWORD"
+            echo "RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+            echo "RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD"
+          } > app/signing.properties
+          echo "$RELEASE_KEY_STORE" | base64 --decode > app/key.jks
+
+      - name: 构建 release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleAppRelease -PUPDATE_CHANNEL=official --build-cache --parallel --warning-mode all
+
+      - name: 整理产物
+        id: apk
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          apk=$(ls app/build/outputs/apk/app/release/*.apk | head -n 1)
+          version=$(basename "$apk" .apk | sed 's/^legado_app_//')
+          sha=$(git rev-parse --short HEAD)
+          name="legado_NG_custom_${version}_${sha}.apk"
+          cp "$apk" "out/$name"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          ls -lh "out/$name"
+
+      - name: 生成更新说明
+        run: |
+          {
+            echo "### custom 构建 ${{ steps.apk.outputs.version }}"
+            echo
+            echo "- 提交：\`${{ github.sha }}\`"
+            echo "- 分支：\`custom\`"
+            echo "- 版本：\`${{ steps.apk.outputs.version }}\`"
+            echo "- 包名：\`io.legado.app.ng.release\`"
+            echo
+            echo "#### 最近提交"
+            echo
+            git log -15 --pretty=format:'- %s'
+            echo
+          } > out/body.md
+          cat out/body.md
+
+      - name: 上传 Actions Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: legado-custom-${{ steps.apk.outputs.version }}-${{ steps.apk.outputs.sha }}
+          path: out/*.apk
+          if-no-files-found: error
+
+      - name: 删除旧的滚动 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$ROLLING_TAG" -y --cleanup-tag || true
+          # 兜底：release 不存在但 tag 残留时也删掉，避免新包挂到旧提交上
+          git push --delete origin "refs/tags/$ROLLING_TAG" || true
+
+      - name: 发布滚动 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.ROLLING_TAG }}
+          name: legado_NG custom ${{ steps.apk.outputs.version }}
+          prerelease: true
+          body_path: out/body.md
+          files: out/*.apk
+          fail_on_unmatched_files: true
