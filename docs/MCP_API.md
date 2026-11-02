@@ -48,7 +48,7 @@ MCP 现在有两条通道：
 | 书架 | `bookshelf_chapter_content_get` | tool | 读取本地或已缓存章节正文，不主动联网抓取。 |
 | 书架 | `bookshelf_text_window_get` | tool | 按当前位置读取章节正文窗口。 |
 | 书架 | `bookshelf_chapter_snippets_get` | tool | 读取指定章节的首尾片段。 |
-| 书架 | `bookshelf_text_search` | tool | 在已缓存/本地正文中定位关键词或正则，返回命中章节清单。 |
+| 书架 | `bookshelf_text_search` | tool | 在已缓存/本地正文中定位关键词，返回命中章节清单。 |
 | 书架 | `bookshelf_cache_status_get` | tool | 获取书籍章节缓存状态。 |
 | 书架 | `bookshelf_cache_download` | tool | 批量触发指定章节离线缓存；写/联网接口。 |
 | 书架 | `bookshelf_cache_clear` | tool | 清理指定章节或整本书正文缓存；写接口。 |
@@ -686,9 +686,11 @@ curl -s http://192.0.2.10:1124/mcp \
 #### 目录/正文/缓存
 
 - `bookshelf_chapter_list`：分页列出目录，默认只返回精简字段；书籍可用 `work_key`、`name + author` 或 `book_url` 定位，支持 `start`、`end`、`limit`、`keyword`、`include_cache_status`、`include_detail`、`include_all`。
+- 章节相关响应统一附带 `chapter_number = index + 1`，阅读进度、目录和命中章节可以直接使用，不需要调用方自行加一。
 - `bookshelf_chapter_content_get`：读取单章已缓存/本地正文，书籍可用 `work_key`、`name + author` 或 `book_url` 定位，支持 `char_limit`。
 - `bookshelf_text_window_get`：读取连续章节窗口，适合给 AI 取上下文，书籍可用 `work_key`、`name + author` 或 `book_url` 定位。
-- `bookshelf_cache_status_get`：检查章节范围的正文缓存状态，书籍可用 `work_key`、`name + author` 或 `book_url` 定位。
+- `bookshelf_cache_status_get`：检查章节范围的正文缓存状态，书籍可用 `work_key`、`name + author` 或 `book_url` 定位，支持 `start`、`end`。
+- `bookshelf_cache_status_get` 的分页规则：`end` 是查询终点（不包含），与单页上限无关；省略 `end` 时查询到全书末尾，单页最多 500 条。返回 `truncated_by_mcp=true` 时用 `next_start` 继续，直到 `truncated_by_mcp=false`；`remaining` 表示查询范围内尚未返回的章节数。
 - `bookshelf_cache_download`：批量触发指定章节离线缓存，支持 `chapter_indexes`、`ranges[{start,end}]` 或 `start/end`；`start` 包含、`end` 不包含。`refresh_existing=true` 会先删除选中章节正文缓存再重新入队下载。
 - `bookshelf_cache_clear`：清理指定章节正文缓存，支持 `chapter_indexes`、`ranges[{start,end}]` 或 `start/end`；如需清理整本书缓存，必须显式传 `clear_book=true`。
 
@@ -717,15 +719,23 @@ curl -s http://192.0.2.10:1124/mcp \
 
 #### 正文搜索
 
-- `bookshelf_text_search`：在一本书的已缓存/本地章节中定位关键词或正则，返回**章节命中清单**，不返回整章正文；只读，不联网。
+- `bookshelf_text_search`：在一本书的已缓存/本地章节中定位关键词，返回**章节命中清单**，不返回整章正文；只读，不联网。
 - 典型用途：角色卡、扫书等 Agent 流程先定位“某角色出现在哪些章节”，再只读取命中章节，避免整本通读消耗 token。
 - 书籍定位复用 `work_key`、`book_url` 或 `name + author`。
 - 支持 `query` 单关键词，或 `queries` 一次传最多 10 个关键词（角色名 + 别名），一次扫描同时统计。
-- 其他参数：`regex`、`ignore_case`、`start_chapter_index`、`end_chapter_index`、`max_matched_chapters`、`include_snippets`、`snippet_chars`、`snippets_per_chapter`、`time_budget_ms`、`apply_replace`。
+- 只支持字面匹配，不支持正则。正则回溯无法在单章内部被时间预算中断，因此本版本不开放该能力。
+- 其他参数：`ignore_case`、`start_chapter_index`、`end_chapter_index`、`max_matched_chapters`、`include_snippets`、`snippet_chars`、`snippets_per_chapter`、`max_total_snippet_chars`、`time_budget_ms`、`apply_replace`。
 - 默认 `include_snippets=false`、`apply_replace=false`，只扫描缓存/本地正文；未缓存章节会跳过并在 `warnings` 中说明。
-- 结果关键字段：`queries[].matched_chapters/total_matches/chapter_indexes`、`chapters[].{index,title,count,hits}`、`scanned_chapters`、`missing_chapters`、`has_more`、`next_start_chapter_index`。
+- 结果关键字段：`queries[].matched_chapters/total_matches/chapter_indexes`、`chapters[].{index,chapter_number,title,count,hits}`、`scanned_chapters`、`missing_chapters`、`has_more`、`next_start_chapter_index`。
 - `count` 和 `total_matches` 是各查询命中次数之和；主名与别名重叠时会重复计数，只用于排序和判断频率。
 - 扫描被命中上限或时间预算截断时，`has_more=true`，用 `next_start_chapter_index` 继续。
+
+片段体积约束：
+
+- 开启 `include_snippets` 后，单个片段最多 600 字符，命中本身也计入上限。
+- `max_total_snippet_chars` 默认 20000、最大 60000，限制单次响应里所有片段的总字符数。
+- 达到总上限时 `truncated_by_snippet_budget=true`，并返回 `snippet_total_chars`、`snippet_budget_chars`；需要更多片段时缩小查询词或调大上限。
+- 只返回命中处附近的片段，不返回整章；章节正文请用 `bookshelf_chapter_content_get`。
 
 示例：
 
@@ -749,10 +759,12 @@ curl -s http://192.0.2.10:1124/mcp \
   "matched_chapters": 90,
   "total_matches": 461,
   "chapters": [
-    {"index": 3, "title": "第三章 青阳镇", "count": 2, "hits": {"林动": 2}}
+    {"index": 3, "chapter_number": 4, "title": "第三章 青阳镇", "count": 2, "hits": {"林动": 2}}
   ],
   "has_more": false,
-  "next_start_chapter_index": null
+  "next_start_chapter_index": null,
+  "snippet_total_chars": 0,
+  "truncated_by_snippet_budget": false
 }
 ```
 

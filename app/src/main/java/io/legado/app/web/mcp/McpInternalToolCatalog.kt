@@ -141,7 +141,7 @@ object McpInternalToolCatalog {
             capability(
                 id = "bookshelf.search_content",
                 title = "搜索正文",
-                description = "在已缓存或本地章节中定位关键词或正则，返回命中章节清单",
+                description = "在已缓存或本地章节中定位关键词，返回命中章节清单",
                 "bookshelf_text_search"
             ),
             capability(
