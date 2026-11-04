@@ -125,8 +125,9 @@ jobs:
             echo '```'
           } > "$body"
 
+          # Issues 被关闭时 gh 会非 0 退出，这里不能让它把整个 job 变红
           existing=$(gh issue list --search 'upstream-sync in:title' --state open \
-            --limit 1 --json number --jq '.[0].number // ""')
+            --limit 1 --json number --jq '.[0].number // ""' || true)
           if [ -n "$existing" ]; then
             echo "追加到已有 issue #$existing"
             gh issue comment "$existing" --body-file "$body"
@@ -140,8 +141,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Issues 被关闭时 gh 会非 0 退出，这里不能让它把整个 job 变红
           existing=$(gh issue list --search 'upstream-sync in:title' --state open \
-            --limit 1 --json number --jq '.[0].number // ""')
+            --limit 1 --json number --jq '.[0].number // ""' || true)
           if [ -n "$existing" ]; then
             gh issue close "$existing" --comment "已自动恢复：本次同步没有冲突，custom 已包含上游 main。"
           fi
