@@ -57,7 +57,7 @@ class AppUpdateReleaseTest {
                     name = OFFICIAL_FILE_NAME,
                     size = 36_392_690L,
                     state = "uploaded",
-                    url = "https://api.github.com/repos/joestar817/legado_NG/releases/assets/1",
+                    url = "https://api.github.com/repos/kmulemg/legado_NG/releases/assets/1",
                 )
             ),
             body = "更新内容",
@@ -75,7 +75,7 @@ class AppUpdateReleaseTest {
 
     @Test
     fun `relay candidates keep github as final fallback`() {
-        val apiUrl = "https://api.github.com/repos/joestar817/legado_NG/releases/latest"
+        val apiUrl = "https://api.github.com/repos/kmulemg/legado_NG/releases/latest"
 
         assertEquals(
             listOf("https://gh-proxy.com/$apiUrl", apiUrl),
@@ -84,7 +84,7 @@ class AppUpdateReleaseTest {
         assertEquals(
             listOf(
                 "https://download.githubcdn.com?url=" +
-                    "https%3A%2F%2Fgithub.com%2Fjoestar817%2Flegado_NG%2Freleases%2Fdownload%2F" +
+                    "https%3A%2F%2Fgithub.com%2Fkmulemg%2Flegado_NG%2Freleases%2Fdownload%2F" +
                     "3.26.090407%2Flegado_NG_3.26.09040726_release.apk",
                 "https://gh-proxy.com/$OFFICIAL_DOWNLOAD_URL",
                 OFFICIAL_DOWNLOAD_URL,
@@ -120,7 +120,7 @@ class AppUpdateReleaseTest {
     private companion object {
         const val OFFICIAL_FILE_NAME = "legado_NG_3.26.09040726_release.apk"
         const val OFFICIAL_DOWNLOAD_URL =
-            "https://github.com/joestar817/legado_NG/releases/download/3.26.090407/" +
+            "https://github.com/kmulemg/legado_NG/releases/download/3.26.090407/" +
                 OFFICIAL_FILE_NAME
     }
 }

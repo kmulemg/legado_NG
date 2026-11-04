@@ -87,7 +87,9 @@ jobs:
           apk=$(ls app/build/outputs/apk/app/release/*.apk | head -n 1)
           version=$(basename "$apk" .apk | sed 's/^legado_app_//')
           sha=$(git rev-parse --short HEAD)
-          name="legado_NGS_custom_${version}_${sha}.apk"
+          # 文件名必须匹配 AppVersion.assetNameRegex：legado_NG_<版本><两位>_release.apk
+          # 版本末尾两位是上游的分钟位，这里固定 00（应用内更新按小时版本比较）
+          name="legado_NG_${version}00_release.apk"
           cp "$apk" "out/$name"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
@@ -131,7 +133,8 @@ jobs:
         with:
           tag_name: ${{ env.ROLLING_TAG }}
           name: legado_NG custom ${{ steps.apk.outputs.version }}
-          prerelease: true
+          # 非 prerelease，应用内更新走 releases/latest 才能取到
+          prerelease: false
           body_path: out/body.md
           files: out/*.apk
           fail_on_unmatched_files: true

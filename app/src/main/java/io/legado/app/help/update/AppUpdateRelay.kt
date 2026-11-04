@@ -10,7 +10,7 @@ internal object AppUpdateRelay {
     private const val API_RELAY_PREFIX = "https://gh-proxy.com/"
     private const val DOWNLOAD_RELAY_PREFIX = "https://gh-proxy.com/"
     private const val STREAM_DOWNLOAD_URL = "https://download.githubcdn.com?url="
-    private const val RELEASE_OWNER = "joestar817"
+    private const val RELEASE_OWNER = "kmulemg"
     private const val RELEASE_REPOSITORY = "legado_NG"
 
     fun apiCandidates(gitHubUrl: String): List<String> {

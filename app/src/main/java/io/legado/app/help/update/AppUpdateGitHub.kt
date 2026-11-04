@@ -30,9 +30,9 @@ object AppUpdateGitHub : AppUpdate.AppUpdateInterface {
 
     private suspend fun getLatestRelease(): List<AppReleaseInfo> {
         val gitHubUrl = if (checkVariant.isBeta()) {
-            "https://api.github.com/repos/joestar817/legado_NG/releases/tags/beta"
+            "https://api.github.com/repos/kmulemg/legado_NG/releases/tags/beta"
         } else {
-            "https://api.github.com/repos/joestar817/legado_NG/releases/latest"
+            "https://api.github.com/repos/kmulemg/legado_NG/releases/latest"
         }
         var lastError: Throwable? = null
         for (releaseUrl in AppUpdateRelay.apiCandidates(gitHubUrl)) {
