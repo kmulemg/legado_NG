@@ -61,7 +61,8 @@ android {
         }
     }
     defaultConfig {
-        applicationId "io.legado.app.ng"
+        // custom 分支专用：与官方 io.legado.app.ng.release 使用不同包名，可共存安装
+        applicationId "io.legado.app.ngs"
         minSdk 21
         targetSdk 36
         versionCode 10000 + gitCommits

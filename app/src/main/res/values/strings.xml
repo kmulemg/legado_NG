@@ -11,7 +11,7 @@
     <string name="text_selection_system_actions_hint">System apps appear at the end of More</string>
     <string name="switch_selection_read_mode">Switch selected-text read mode</string>
     <!--App-->
-    <string name="app_name">阅读</string>
+    <string name="app_name">阅读NGS</string>
     <string name="receiving_shared_label">Legado·search</string>
     <string name="tip_perm_request_storage">Legado needs storage access to find and read books. please go "App Settings" to allow "Storage permission".</string>
 
@@ -2273,7 +2273,7 @@
     <string name="video_setting">视频设置</string>
     <string name="video_setting_summary">自动播放、全屏播放等配置</string>
     <string name="history">历史记录</string>
-    <string name="app_name_ng">阅读NG</string>
+    <string name="app_name_ng">阅读NGS</string>
     <string name="about_description_ng">致力于打造下一代阅读体验</string>
     <string name="contributors_summary_ng">详情请在 GitHub 中查看</string>
     <string name="about_action_github">GitHub</string>

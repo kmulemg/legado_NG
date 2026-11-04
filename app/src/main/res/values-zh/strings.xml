@@ -9,7 +9,7 @@
     <string name="text_selection_system_actions_hint">系统应用自动排在更多菜单末尾</string>
     <string name="switch_selection_read_mode">切换选中文字朗读模式</string>
     <!--App-->
-    <string name="app_name">阅读</string>
+    <string name="app_name">阅读NGS</string>
     <string name="receiving_shared_label">阅读·搜索</string>
     <string name="tip_perm_request_storage">阅读需要访问存储卡权限，请前往“设置”—“应用权限”，打开所需权限</string>
 

@@ -87,7 +87,7 @@ jobs:
           apk=$(ls app/build/outputs/apk/app/release/*.apk | head -n 1)
           version=$(basename "$apk" .apk | sed 's/^legado_app_//')
           sha=$(git rev-parse --short HEAD)
-          name="legado_NG_custom_${version}_${sha}.apk"
+          name="legado_NGS_custom_${version}_${sha}.apk"
           cp "$apk" "out/$name"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
@@ -102,7 +102,7 @@ jobs:
             echo "- 提交：\`${{ github.sha }}\`"
             echo "- 分支：\`custom\`"
             echo "- 版本：\`${{ steps.apk.outputs.version }}\`"
-            echo "- 包名：\`io.legado.app.ng.release\`"
+            echo "- 包名：\`io.legado.app.ngs.release\`"
             echo
             echo "#### 最近提交"
             echo
