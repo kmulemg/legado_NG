@@ -129,7 +129,7 @@ jobs:
           git push --delete origin "refs/tags/$ROLLING_TAG" || true
 
       - name: 发布滚动 Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.ROLLING_TAG }}
           name: legado_NG custom ${{ steps.apk.outputs.version }}
