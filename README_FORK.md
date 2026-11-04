@@ -10,13 +10,26 @@
 
 ---
 
-## 当前目标
+## 改动与 PR 状态
+
+| 功能 | PR | 状态 |
+| --- | --- | --- |
+| MCP 单本正文搜索 `bookshelf_text_search` | [#96](https://github.com/joestar817/legado_NG/pull/96) | 已合并进 `upstream/main` |
+| 角色卡指定角色模式与正文选中入口 | [#97](https://github.com/joestar817/legado_NG/pull/97) | 待评审（head `7078310cd`，已处理同名语义与记忆开关单测） |
+| 角色卡编辑页显示并复制生图提示词 | [#98](https://github.com/joestar817/legado_NG/pull/98) | 已合并进 `upstream/main` |
+| AI 聊天 token 用量累计 | [#99](https://github.com/joestar817/legado_NG/pull/99) | 待评审（P2 已修正：`d62a2eff8`） |
+
+`#97` 原先基于 `#96` 堆叠；`#96` 合并后，`#97` 的 diff 已收敛到 12 个文件。分支上的提交都保留，Review 修改使用新增提交，不 force-push。
+
+---
+
+## 功能详情
 
 ### 1. 新增 MCP 工具：`bookshelf_text_search`（单本正文搜索）
 
 **用途**：让 AI 在做角色卡、扫书等任务时，先在**一本书**里定位"某角色出现在哪些章节"，然后只读取这些章节，避免通读全书浪费 token。
 
-**状态**：已实现；Debug 编译、MCP 目录/路由单测、匹配器单测通过；待真机联调。
+**状态**：已实现并合并（PR #96，`19d7b3058`）。Debug 编译、MCP 目录/路由单测、匹配器单测通过；MCP 集成脚本与真机联调仍需按设备环境单独执行。
 
 #### 为什么可行
 
@@ -92,7 +105,7 @@
 
 #### 角色卡 Skill 接入
 
-`assets/skills/character_card_generate.md` 已升级到版本 27：
+`assets/skills/character_card_generate.md` 已升级到版本 28：
 
 - `mcp_capabilities` 增加 `bookshelf.search_content`
 - preview 阶段允许工具增加 `bookshelf_text_search`
@@ -103,12 +116,27 @@
 - 探索预算与追读预算分离，避免窗口数与单轮上限互相矛盾
 - 应用确认块提供固定 JSON 结构，部分写入失败标记为 `partial` 并支持只重试失败项
 - 指定角色入口直接搜索缓存章节，不再强制询问范围；发现模式保留范围/强度选择
+- 同名角色统一收敛为「更新已有 / 跳过」，不提供“新建为不同角色”；同一作品同名不同人物暂不支持分别建卡
 - 章节号统一按 1-based 换算，已有角色卡按 name/aliases 去重并复用 id 更新
 - 单文件约 430 行；`references/` 拆分需要额外的 Agent Skill 包加载支持，暂未启用
 - 去掉 `intro` 长度限制；缓存按 `next_start` 分页；MCP 结果新增 `chapter_number`
 - 发现模式每个候选至少读 1 个命中窗口；窗口和片段不重复读，片段折算追读预算
 - `AiChatClient` 改为累计一轮内所有模型调用的真实 token，不再只记录最后一次调用
 
+#### 正文选中入口（PR #97）
+
+阅读页长按选中文本后，操作菜单新增「创建角色卡」：
+
+- 只接受单个角色名：自动去掉引号、书名号和括号，长度超过 24、含换行或标点时会提示「请只选择一个角色名字」
+- 入口把 `work_key`、书名/作者、`book_url`、当前章节号（1-based）、章节标题和总章节数写入 `AgentModeEntryContext`
+- 自动加载 `character_card_generate`，并以“指定角色模式”预填输入：直接使用当前书已缓存章节，不再询问扫描范围或强度
+- 正文选中菜单的顺序不做历史迁移，新动作追加在已保存顺序之后，用户仍可在设置里调整
+- 当前入口不新增 MCP 工具，复用 `bookshelf.search_content` / `bookshelf.read_content`
+
+真机验证（vivo PD2256，Android 16，`3.26.110315debug`）：
+
+- 已验证：菜单入口、会话标题、Skill 芯片、选中角色附件、预填提示词、设备内 Skill 从 v20 自动升级到 v27
+- 未验证：真实模型调用、预览表格、应用/取消、已有角色更新
 
 #### 改动清单
 
@@ -117,10 +145,15 @@
 | `app/src/main/java/io/legado/app/web/mcp/BookshelfMcpTools.kt` | 工具定义 + `call()` 分发 + 扫描实现 |
 | `app/src/main/java/io/legado/app/web/mcp/McpTextQuery.kt` | 新增纯匹配器（关键词/正则、计数、片段） |
 | `app/src/main/java/io/legado/app/web/mcp/McpInternalToolCatalog.kt` | 新增能力 `bookshelf.search_content` |
-| `app/src/main/assets/skills/character_card_generate.md` | 版本 27：双模式、章节号换算、去重、分析/生成分离、缓存分页、候选补读、片段预算、真实 token 统计 |
+| `app/src/main/assets/skills/character_card_generate.md` | 版本 28：双模式、章节号换算、去重、分析/生成分离、缓存分页、候选补读、片段预算、真实 token 统计、同名角色收敛为更新或跳过 |
 | `app/src/test/java/io/legado/app/web/mcp/McpTextQueryTest.kt` | 匹配与片段单元测试 |
 | `docs/MCP_API.md` | 工具总览、能力分组、调用示例 |
 | `scripts/test_mcp_api.py` | `EXPECTED_TOOLS` 与只读用例 |
+| `app/src/main/java/io/legado/app/ui/book/read/ReadBookActivity.kt` | 文本选择菜单「创建角色卡」入口与角色名校验 |
+| `app/src/main/java/io/legado/app/ui/book/info/BookAiAssistantLauncher.kt` | 构造 `text_selection_character_card` 入口上下文与预填提示词 |
+| `app/src/main/java/io/legado/app/help/config/TextSelectionActionOrder.kt` | 注册新动作；不再迁移旧顺序 |
+| `app/src/main/res/menu/content_select_action.xml` | 新增 `menu_character_card` |
+| `scripts/test_character_card_skill.py` | 指定角色模式与 v27 策略测试（21 个用例） |
 
 ### 2. 后续方向（待定）
 
@@ -197,11 +230,29 @@ AI 设置 → 提供商页面在 2026-11 合并了以下改进（上游 PR #93�
 
 ## 角色卡生图提示词
 
-角色卡编辑弹窗新增「生图提示词」字段：
+角色卡编辑弹窗新增「生图提示词」字段（PR #98，已合并：`79196b6ac`）：
 
 - 显示并编辑 `BookCharacter.imagePrompt`
 - 非空时提供「复制」按钮，复制到系统剪贴板
 - 该字段仅保存提示词，当前不会自动调用生图模型
+
+---
+
+## AI 聊天 token 用量
+
+`AiChatClient` 累计一轮内所有模型调用的 usage，而不是只保留最后一次调用（PR #99）。
+
+累计规则（`AiChatUsageAccumulator`）：
+
+- `prompt_tokens` / `completion_tokens` / `total_tokens` 分别记录“是否上报”，缺失字段保持 `null`，不会补 0
+- `total_tokens` 优先累计服务端每次调用上报的值
+- 服务端未返回 `total` 时，只有单次调用的 prompt 和 completion 都已知，才用二者补算总量
+- 多次调用中存在缺失 usage 时，`warnings` 会追加“本轮有 N 次模型调用未返回用量，token 统计仅包含已返回的部分”
+- 全部调用都没有 usage 时结果为 `null`，避免 UI 显示 `↑0 / ↓0`
+
+回归测试 `AiChatUsageAccumulatorTest` 覆盖完整/部分/全缺失 usage、多次调用、流式最终 chunk 和上报 0，共 9 个用例。
+
+状态：P2 修正已提交到 `feature/ai-token-usage`（`d62a2eff8`），等待评审；仅有单测与编译验证，未做真机真实提供商回归。
 
 ---
 
@@ -247,25 +298,78 @@ echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties
 ./gradlew testAppDebugUnitTest
 ```
 
-产物：`app/build/outputs/apk/app/debug/legado_app_*.apk`（包名 `io.legado.app.ng.debug`）。
+产物：`app/build/outputs/apk/app/debug/legado_app_*.apk`（包名 `io.legado.app.ngs.debug`）。
 
 Release 需要在 `app/signing.properties` 或命令行提供 `RELEASE_STORE_FILE` 等参数；未配置时只产出未签名包。
 
 ---
 
+## 构建与发布（custom 分支）
+
+`custom` 是自用的全功能集成分支，包名和发布链路与上游完全隔离：
+
+| 项 | 值 |
+| --- | --- |
+| `applicationId` | `io.legado.app.ngs` |
+| Release 包名 | `io.legado.app.ngs.release` |
+| Debug 包名 | `io.legado.app.ngs.debug` |
+| 桌面显示名 | 阅读NGS |
+| 与官方包 | 包名不同，可与 `io.legado.app.ng.release` 共存安装 |
+
+包名不能随意再改：Android 用「包名 + 签名证书」判定升级，换包名相当于换了一个 App，旧数据不会迁移，需要先在旧版做 `设置 → 备份与恢复` 再导入。
+
+### 自动构建
+
+push `custom` 触发 `.github/workflows/custom-apk.yml`：
+
+1. JDK 17 + `assembleAppRelease`
+2. 用仓库 Secrets 里的 keystore 签名（`RELEASE_KEY_STORE` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD` / `RELEASE_STORE_PASSWORD`）
+3. 上传 Actions Artifact
+4. 删除并重建滚动 Release `custom-latest`
+
+滚动 Release 固定地址：`https://github.com/kmulemg/legado_NGS/releases/tag/custom-latest`
+
+手动触发：`gh workflow run custom-apk.yml --ref custom`。连续 push 时并发组只保留最后一次构建。
+
+两条硬约束：
+
+- Release 资产名必须是 `legado_NG_<版本>00_release.apk`（匹配 `AppVersion.assetNameRegex`）
+- Release 不能勾 `prerelease`，因为应用内更新走 `releases/latest`，该接口不返回 prerelease
+
+### 应用内更新
+
+`AppUpdateRelay.RELEASE_OWNER` 与 `AppUpdateGitHub` 的接口地址都指向本 fork，所以「检查更新」只看 `kmulemg/legado_NGS` 的 Release，不再提示上游版本（包名不同，装了也覆盖不了）。
+
+改动更新相关代码后运行：
+
+```bash
+./gradlew :app:testAppDebugUnitTest --tests "io.legado.app.help.update.*"
+```
+
+---
+
 ## 与上游同步
 
+仓库默认分支是 `custom`：GitHub 的 `schedule` 只执行默认分支上的 workflow，而同步脚本属于 fork 专属文件。`main` 是上游的纯镜像，不含 fork 提交，可以随时快进。
+
+自动同步由 `.github/workflows/sync-upstream.yml` 完成，每天 04:00（北京时间）：
+
+1. 调 `POST /repos/kmulemg/legado_NGS/merge-upstream` 把 `main` 快进到 `upstream/main`
+2. 把 `main` 合入 `custom`，成功则 push 并派发 `custom-apk`
+3. 冲突则不推送，开/追加标题含 `upstream-sync` 的 issue 列出冲突文件
+
+手动同步：
+
 ```bash
-git remote -v          # origin = 本 fork，upstream = joestar817/legado_NG
 git fetch upstream
-git merge upstream/main      # 或 git rebase upstream/main
+git branch -f main upstream/main     # main 未被 checkout 时
+git switch custom
+git merge main
 ```
 
-如果本地是浅克隆，先补全历史：
+高频冲突点：`app/src/main/res/values/strings.xml` 与 `values-zh/strings.xml`（AI 字符串重复定义），以及 custom 专属的 `applicationId`、`AppUpdateRelay.RELEASE_OWNER`。本机已启用 `git rerere`，相同冲突会自动复用上次解法；CI 上没有 rerere，遇到冲突会停下来开 issue 等人工处理。
 
-```bash
-git fetch --unshallow
-```
+浅克隆需先 `git fetch --unshallow`。
 
 ---
 
