@@ -30,16 +30,9 @@ object TextSelectionActionOrder {
     fun load(): List<TextSelectionBuiltInAction> {
         val keys = appCtx.getPrefString(PREF_KEY).orEmpty().split(',')
         val saved = keys.mapNotNull { key -> TextSelectionBuiltInAction.entries.find { it.key == key } }
-        val merged = (saved + TextSelectionBuiltInAction.entries).distinct().toMutableList()
-        // Existing users saved an order before CHARACTER_CARD existed. Put the new
-        // action right after read-aloud once, then let the user reorder it normally.
-        if (saved.isNotEmpty() && TextSelectionBuiltInAction.CHARACTER_CARD !in saved) {
-            merged.remove(TextSelectionBuiltInAction.CHARACTER_CARD)
-            val readAloudIndex = merged.indexOf(TextSelectionBuiltInAction.READ_ALOUD)
-            val insertIndex = if (readAloudIndex >= 0) readAloudIndex + 1 else merged.size
-            merged.add(insertIndex, TextSelectionBuiltInAction.CHARACTER_CARD)
-        }
-        return merged
+        // No migration of previously saved orders: new actions simply append after
+        // the saved ones and users can reorder them in settings.
+        return (saved + TextSelectionBuiltInAction.entries).distinct()
     }
 
     fun save(actions: List<TextSelectionBuiltInAction>, disabledKeys: Set<String>) {
