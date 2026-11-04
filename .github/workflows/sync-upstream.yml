@@ -1,0 +1,147 @@
+name: Sync Upstream
+
+# 个人 fork 专用：每天把上游 joestar817/legado_NG 的 main 同步过来，
+# 再合入 custom；合并成功则推送 custom（触发 custom-apk 出包），
+# 冲突则不推送，改开/追加一个 issue 列出冲突文件。
+#
+# 为什么放在 custom 而不是 main：GitHub 的 schedule 只执行「默认分支」上的 workflow。
+# 本仓库默认分支已设为 custom，所以本文件放这里才能定时跑；同时 main 保持与上游
+# 完全一致（纯镜像，可随时安全 ff 到 upstream/main），自动同步不必在 main 上留任何提交。
+# 本文件只存在于 custom，不要合进 main，也不要带进给上游的 PR 分支。
+
+on:
+  schedule:
+    # 每天北京时间 04:00（UTC 20:00）
+    - cron: '0 20 * * *'
+  # 允许在 Actions 页面手动立即触发一次
+  workflow_dispatch:
+
+# 串行执行，避免两次同步互相踩
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # 同步 main、推送 custom
+  issues: write     # 冲突时开/更新 issue，恢复后自动关闭
+  actions: write    # 合并成功后显式派发 custom-apk
+
+env:
+  TARGET_BRANCH: custom
+  APK_WORKFLOW: custom-apk.yml
+  UPSTREAM_REPO: joestar817/legado_NG
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 同步 main（等价网页 Sync fork）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 用官方接口而不是本地 git merge，避免 main 上的本文件让 ff-only 永远失败
+          resp=$(gh api -X POST "repos/${{ github.repository }}/merge-upstream" -f branch=main)
+          echo "$resp" | jq -r '"merge_type=\(.merge_type) base_branch=\(.base_branch)"'
+
+      - name: 检出 custom
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          # 合并、冲突检测、custom-apk 的 versionCode 都依赖完整历史
+          fetch-depth: 0
+
+      - name: 合并 main 到 custom
+        id: merge
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git fetch --no-tags origin main
+
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "custom 已包含 main 的全部提交，无需合并"
+            echo "result=up-to-date" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git merge --no-ff --no-edit origin/main; then
+            echo "result=merged" >> "$GITHUB_OUTPUT"
+            echo "merged_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            # 先记录冲突文件，再中止合并，保证工作区干净、不推送任何内容
+            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts.txt" || true
+            git merge --abort || true
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+            echo "将 origin/main（$(git rev-parse --short origin/main)）合入 ${TARGET_BRANCH} 时冲突，已中止："
+            sed 's/^/  - /' "$RUNNER_TEMP/conflicts.txt"
+            {
+              echo "### 冲突文件"
+              sed 's/^/- `&`/' "$RUNNER_TEMP/conflicts.txt"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 推送 custom 并触发 APK 构建
+        if: steps.merge.outputs.result == 'merged'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:${TARGET_BRANCH}"
+          # 用 GITHUB_TOKEN 推的提交不会触发其他 workflow，
+          # 所以显式派发一次 custom-apk（workflow_dispatch 不受这条限制）。
+          gh workflow run "$APK_WORKFLOW" --ref "$TARGET_BRANCH"
+
+      - name: 冲突时开 issue
+        if: steps.merge.outputs.result == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/issue.md"
+          upstream_sha=$(git rev-parse origin/main)
+
+          {
+            echo "自动同步把 \`main\` 合入 \`${TARGET_BRANCH}\` 时遇到冲突，已中止并**未推送任何改动**。"
+            echo
+            echo "- 时间：$(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo "- 上游提交：\`${upstream_sha}\`（${UPSTREAM_REPO}）"
+            echo "- 目标分支：\`${TARGET_BRANCH}\`"
+            echo
+            echo "### 冲突文件"
+            echo
+            sed 's/^/- `&`/' "$RUNNER_TEMP/conflicts.txt"
+            echo
+            echo "### 本地处理"
+            echo
+            echo '```bash'
+            echo "git fetch origin && git fetch upstream"
+            echo "git switch ${TARGET_BRANCH}"
+            echo "git merge origin/main   # 本地有 rerere，可复用已有解法"
+            echo "git push origin ${TARGET_BRANCH}"
+            echo '```'
+          } > "$body"
+
+          existing=$(gh issue list --search 'upstream-sync in:title' --state open \
+            --limit 1 --json number --jq '.[0].number // ""')
+          if [ -n "$existing" ]; then
+            echo "追加到已有 issue #$existing"
+            gh issue comment "$existing" --body-file "$body"
+          else
+            gh issue create --title '[upstream-sync] 上游 main 无法自动合入 custom' --body-file "$body"
+          fi
+
+      - name: 恢复后关闭遗留 issue
+        if: steps.merge.outputs.result == 'merged' || steps.merge.outputs.result == 'up-to-date'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --search 'upstream-sync in:title' --state open \
+            --limit 1 --json number --jq '.[0].number // ""')
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "已自动恢复：本次同步没有冲突，custom 已包含上游 main。"
+          fi
