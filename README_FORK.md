@@ -17,7 +17,7 @@
 | MCP 单本正文搜索 `bookshelf_text_search` | [#96](https://github.com/joestar817/legado_NG/pull/96) | 已合并进 `upstream/main` |
 | 角色卡指定角色模式与正文选中入口 | [#97](https://github.com/joestar817/legado_NG/pull/97) | 待评审（head `7078310cd`，已处理同名语义与记忆开关单测） |
 | 角色卡编辑页显示并复制生图提示词 | [#98](https://github.com/joestar817/legado_NG/pull/98) | 已合并进 `upstream/main` |
-| AI 聊天 token 用量累计 | [#99](https://github.com/joestar817/legado_NG/pull/99) | 待评审（P2 已修正：`d62a2eff8`） |
+| AI 聊天 token 用量累计 | [#99](https://github.com/joestar817/legado_NG/pull/99) | 已合并进 `upstream/main`（2026-11-03） |
 
 `#97` 原先基于 `#96` 堆叠；`#96` 合并后，`#97` 的 diff 已收敛到 12 个文件。分支上的提交都保留，Review 修改使用新增提交，不 force-push。
 
@@ -329,7 +329,7 @@ push `custom` 触发 `.github/workflows/custom-apk.yml`：
 
 滚动 Release 固定地址：`https://github.com/kmulemg/legado_NGS/releases/tag/custom-latest`
 
-手动触发：`gh workflow run custom-apk.yml --ref custom`。连续 push 时并发组只保留最后一次构建。
+手动触发：`gh workflow run custom-apk.yml --ref custom -R kmulemg/legado_NGS`（本目录下 `gh` 会默认解析到上游 `joestar817/legado_NG`，必须带 `-R`）。连续 push 时并发组只保留最后一次构建。
 
 两条硬约束：
 
