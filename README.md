@@ -63,6 +63,10 @@ Legado NG 持续开发中，后续会继续修复问题、改善兼容性和运�
 
 ## 下载与开始使用
 
+> **本 fork 的 `custom` 分支构建为「阅读NGS」**：包名 `io.legado.app.ngs.release`，可与
+> 官方包共存安装，下载见 [本仓库 Releases](https://github.com/kmulemg/legado_NGS/releases/tag/custom-latest)。
+> 详见 [README_FORK.md](README_FORK.md)。
+
 前往 **[GitHub Releases](https://github.com/joestar817/legado_NG/releases/latest)** 下载最新 APK。
 
 首次使用时，可以导入自己的书源或订阅源，也可以直接导入本地 TXT／EPUB 文件。AI 和在线朗读按需配置，不影响基础阅读。
