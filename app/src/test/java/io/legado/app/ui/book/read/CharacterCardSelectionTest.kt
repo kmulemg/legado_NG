@@ -30,30 +30,30 @@ class CharacterCardSelectionTest {
     }
 
     @Test
-    fun exactNameWinsOverEarlierAlias() {
-        val aliasOwner = BookCharacter(id = 1L, name = "韩立", aliasesJson = "[\"厉飞雨\"]")
-        val exactNameOwner = BookCharacter(id = 2L, name = "厉飞雨", aliasesJson = "[]")
-
+    fun exactNameTakesPrecedenceOverAnotherCharactersAlias() {
+        val liFeiYu = BookCharacter(id = 3L, name = "厉飞雨", aliasesJson = "[]")
         assertEquals(
-            exactNameOwner,
-            CharacterCardSelection.match("厉飞雨", listOf(aliasOwner, exactNameOwner)),
+            liFeiYu,
+            CharacterCardSelection.match("厉飞雨", listOf(hanLi, liFeiYu)),
         )
     }
 
     @Test
-    fun listOrderDoesNotChangeExactNameMatch() {
-        val aliasOwner = BookCharacter(id = 1L, name = "韩立", aliasesJson = "[\"厉飞雨\"]")
-        val exactNameOwner = BookCharacter(id = 2L, name = "厉飞雨", aliasesJson = "[]")
-
-        assertEquals(
-            exactNameOwner,
-            CharacterCardSelection.match("厉飞雨", listOf(exactNameOwner, aliasOwner)),
-        )
+    fun exactNameMatchDoesNotDependOnCharacterOrder() {
+        val liFeiYu = BookCharacter(id = 3L, name = "厉飞雨", aliasesJson = "[]")
+        listOf(listOf(hanLi, liFeiYu), listOf(liFeiYu, hanLi)).forEach { ordered ->
+            assertEquals(liFeiYu, CharacterCardSelection.match("厉飞雨", ordered))
+        }
     }
 
     @Test
-    fun aliasStillMatchesWhenNoExactNameExists() {
-        assertEquals(hanLi, CharacterCardSelection.match("厉飞雨", characters))
+    fun normalizedNameTakesPrecedenceOverAnotherCharactersAlias() {
+        val aliasOwner = BookCharacter(name = "Other", aliasesJson = "[\"li fei\"]")
+        val liFei = BookCharacter(name = "Li  Fei", aliasesJson = "[]")
+        assertEquals(
+            liFei,
+            CharacterCardSelection.match("“LI   FEI”", listOf(aliasOwner, liFei)),
+        )
     }
 
     @Test
