@@ -12,6 +12,8 @@ on:
       - '**/*.md'
       - 'docs/**'
       - 'chat_records/**'
+      # 工作流本身不影响安装包，改 CI 不必重编一次
+      - '.github/workflows/**'
   workflow_dispatch:
 
 concurrency:
@@ -108,8 +110,16 @@ jobs:
             echo
             echo "#### 最近提交"
             echo
-            git log -15 --pretty=format:'- %s'
+            git log -15 --no-merges --pretty=format:'- %s'
             echo
+            # 集成进来的功能写的是 merge commit，单独列出来，避免被 --no-merges 吃掉
+            integrated=$(git log -20 --grep='chore(feature): 集成' --pretty=format:'- %s' || true)
+            if [ -n "$integrated" ]; then
+              echo "#### 最近集成的分支"
+              echo
+              echo "$integrated"
+              echo
+            fi
           } > out/body.md
           cat out/body.md
 

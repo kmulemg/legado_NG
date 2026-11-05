@@ -16,9 +16,10 @@ on:
   # 允许在 Actions 页面手动立即触发一次
   workflow_dispatch:
 
-# 串行执行，避免两次同步互相踩
+# 串行执行，避免两次同步互相踩。
+# 组名与 integrate.yml 共用：所有会写 custom 的 workflow 必须共用同一把锁。
 concurrency:
-  group: sync-upstream
+  group: custom-writer
   cancel-in-progress: false
 
 permissions:

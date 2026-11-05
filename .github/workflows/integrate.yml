@@ -1,0 +1,246 @@
+name: Integrate Feature
+
+# 个人 fork 专用：把「开发完成、并已向上游提 PR」的功能分支集成进 custom。
+#
+# 触发方式只有 workflow_dispatch —— 由 Agent 在创建上游 PR 之后立即派发：
+#   gh workflow run integrate.yml --ref custom -f branch=<分支> -f pr=<PR号> -R kmulemg/legado_NGS
+#
+# 为什么不用 pull_request 事件：PR 的 base 是上游 joestar817/legado_NG，
+# GitHub 只把 pull_request 事件发给 base 仓库，本 fork 收不到任何 PR 事件。
+#
+# 为什么不用 push 事件：feature 分支从干净的 main 切出，里面没有本文件；
+# push 事件用的是「被推送那个 ref 里」的 workflow 文件，所以永远不会触发。
+#
+# 本文件只存在于 custom，不要合进 main，也不要带进 feature/PR 分支。
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: '要集成到 custom 的分支名（如 feature/xxx）'
+        required: true
+        type: string
+      pr:
+        description: '上游 PR 号（可选，只写进合并提交信息）'
+        required: false
+        type: string
+
+# 所有会写 custom 的 workflow 必须共用同一把锁，避免和 sync-upstream 互相踩
+concurrency:
+  group: custom-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # 推送 custom
+  issues: write     # 冲突时开/关 issue
+  actions: write    # 显式派发 custom-apk
+
+env:
+  TARGET_BRANCH: custom
+  APK_WORKFLOW: custom-apk.yml
+  UPSTREAM_REPO: joestar817/legado_NG
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 检出 custom
+        uses: actions/checkout@v5
+        with:
+          ref: custom
+          # 合并需要完整历史
+          fetch-depth: 0
+
+      - name: 校验输入与分支
+        id: check
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          BRANCH="$(echo "$BRANCH" | tr -d '[:space:]')"
+          if [ -z "$BRANCH" ]; then
+            echo "::error::branch 不能为空"
+            exit 1
+          fi
+          if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "$TARGET_BRANCH" ]; then
+            echo "::error::$BRANCH 由自动流程处理，不需要手动集成"
+            exit 1
+          fi
+          git fetch --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" || {
+            echo "::error::fetch 失败，origin 上可能不存在分支 $BRANCH"
+            exit 1
+          }
+          if ! git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
+            echo "::error::origin 上不存在分支 $BRANCH"
+            exit 1
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: 保护检查
+        env:
+          BRANCH: ${{ steps.check.outputs.branch }}
+        run: |
+          set -euo pipefail
+          range="origin/main...origin/$BRANCH"
+
+          # fork 专属内容不允许从功能分支带回 custom（会造成自定义包名/CI 被覆盖）
+          forbidden=$(git diff --name-only "$range" \
+            | grep -E '^(README_FORK\.md|AGENTS\.md|scripts/sync_chat_records\.py)$' || true)
+          if [ -n "$forbidden" ]; then
+            echo "::error::以下文件属于 fork 专属内容，不能被功能分支带回 custom："
+            echo "$forbidden" | sed 's/^/  - /'
+            exit 1
+          fi
+          if git diff "$range" -- app/build.gradle | grep -qE '^[+-][^+-].*applicationId'; then
+            echo "::error::功能分支改动了 applicationId，拒绝集成"
+            exit 1
+          fi
+
+          # 工作流文件只告警不阻断：功能分支修改上游 test.yml 是合理的
+          touched=$(git diff --name-only "$range" | grep -E '^\.github/workflows/' || true)
+          if [ -n "$touched" ]; then
+            echo "::warning::该分支改动了工作流文件，请确认合并后 custom 的 CI 仍然正常："
+            echo "$touched" | sed 's/^/  - /'
+          fi
+
+      - name: 合并最新 main 与功能分支
+        id: merge
+        env:
+          BRANCH: ${{ steps.check.outputs.branch }}
+          PR_NUMBER: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          before=$(git rev-parse HEAD)
+          echo "before=$before" >> "$GITHUB_OUTPUT"
+
+          record_conflict() {
+            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts.txt" || true
+            git merge --abort || true
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+            echo "stage=$1" >> "$GITHUB_OUTPUT"
+            {
+              echo "### 合并冲突（$1 阶段）"
+              sed 's/^/- `&`/' "$RUNNER_TEMP/conflicts.txt"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          # 1) 先吃最新上游，避免「开发期间 main 已前进」导致的集成冲突
+          if ! git merge --no-ff --no-edit -m "chore(sync): 集成前同步上游 main" origin/main; then
+            record_conflict "main"
+            exit 0
+          fi
+
+          # 2) 上游已经合并了这个 PR（merge commit 形式）时，第 1 步就够了
+          if git merge-base --is-ancestor "refs/remotes/origin/$BRANCH" HEAD; then
+            echo "分支已包含在 main / custom 中，跳过分支合并"
+          else
+            msg="chore(feature): 集成 ${BRANCH}"
+            if [ -n "${PR_NUMBER:-}" ]; then
+              msg="$msg（上游 PR #${PR_NUMBER}）"
+            fi
+            if ! git merge --no-ff --no-edit -m "$msg" "refs/remotes/origin/$BRANCH"; then
+              record_conflict "branch"
+              exit 0
+            fi
+          fi
+
+          after=$(git rev-parse HEAD)
+          echo "after=$after" >> "$GITHUB_OUTPUT"
+          if [ "$before" = "$after" ]; then
+            echo "result=up-to-date" >> "$GITHUB_OUTPUT"
+            echo "custom 已包含最新 main 与该分支，无需推送"
+          else
+            echo "result=merged" >> "$GITHUB_OUTPUT"
+            echo "合并成功，待编译门禁"
+          fi
+
+      - name: Set up JDK 17
+        if: steps.merge.outputs.result == 'merged'
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 17
+
+      - name: Set up Gradle
+        if: steps.merge.outputs.result == 'merged'
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: 编译门禁
+        if: steps.merge.outputs.result == 'merged'
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:compileAppDebugKotlin --build-cache --parallel --warning-mode all
+
+      - name: 推送 custom 并派发 APK 构建
+        if: steps.merge.outputs.result == 'merged'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 失败就明确报错：写 custom 的只有本 workflow 和 sync-upstream，二者共用 concurrency 锁
+          git push origin "HEAD:${TARGET_BRANCH}"
+          # 用 GITHUB_TOKEN 推的提交不会触发其他 workflow，必须显式派发
+          gh workflow run "$APK_WORKFLOW" --ref "$TARGET_BRANCH" -R "$GITHUB_REPOSITORY"
+
+      - name: 冲突时开/更新 issue
+        if: steps.merge.outputs.result == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.check.outputs.branch }}
+          STAGE: ${{ steps.merge.outputs.stage }}
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/issue.md"
+          {
+            echo "把 \`$BRANCH\` 集成到 \`$TARGET_BRANCH\` 时在 **$STAGE** 阶段冲突，已中止并**未推送任何改动**。"
+            echo
+            echo "- 时间：$(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo "- 上游 main：\`$(git rev-parse refs/remotes/origin/main)\`（$UPSTREAM_REPO）"
+            echo "- 分支：\`$(git rev-parse "refs/remotes/origin/$BRANCH")\`"
+            echo
+            echo "### 冲突文件"
+            echo
+            sed 's/^/- `&`/' "$RUNNER_TEMP/conflicts.txt"
+            echo
+            echo "### 本地处理"
+            echo
+            echo '```bash'
+            echo "git fetch origin && git switch $TARGET_BRANCH"
+            echo "git merge --no-ff origin/main"
+            echo "git merge --no-ff origin/$BRANCH   # 本机有 rerere，可复用已有解法"
+            echo "git push origin $TARGET_BRANCH"
+            echo "gh workflow run $APK_WORKFLOW --ref $TARGET_BRANCH -R kmulemg/legado_NGS"
+            echo '```'
+          } > "$body"
+
+          # Issues 被关闭时 gh 会非 0 退出，这里不能让它把整个 job 变红
+          existing=$(gh issue list -R "$GITHUB_REPOSITORY" \
+            --search "in:title \"集成冲突 $BRANCH\"" --state open \
+            --limit 1 --json number --jq '.[0].number // ""' || true)
+          if [ -n "$existing" ]; then
+            echo "追加到已有 issue #$existing"
+            gh issue comment -R "$GITHUB_REPOSITORY" "$existing" --body-file "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "集成冲突 $BRANCH" --body-file "$body"
+          fi
+
+      - name: 成功时关闭遗留 issue
+        if: steps.merge.outputs.result == 'merged' || steps.merge.outputs.result == 'up-to-date'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.check.outputs.branch }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list -R "$GITHUB_REPOSITORY" \
+            --search "in:title \"集成冲突 $BRANCH\"" --state open \
+            --limit 1 --json number --jq '.[0].number // ""' || true)
+          if [ -n "$existing" ]; then
+            gh issue close -R "$GITHUB_REPOSITORY" "$existing" --comment "已恢复：本次已成功把 \`$BRANCH\` 集成到 \`$TARGET_BRANCH\`。"
+          fi
